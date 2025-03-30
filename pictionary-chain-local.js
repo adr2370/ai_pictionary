@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const { promisify } = require("util");
 const exec = promisify(require("child_process").exec);
+const { getPictionaryPrompt } = require("./promptTemplates");
 
 // Configuration
 const COMFYUI_API_URL = "http://127.0.0.1:8188"; // Local ComfyUI server address
@@ -87,9 +88,7 @@ async function generateImage(prompt, roundNumber) {
     // Modify this to match your actual workflow structure
     for (const nodeId in workflow) {
       if (workflow[nodeId]._meta.title === "Positive Prompt") {
-        workflow[
-          nodeId
-        ].inputs.text = `An ultra-simple MS Paint style drawing of a ${prompt}. Just black pixel lines on white background. No detail, no shading, only the most basic outline that would still be recognizable in a game of pictionary. Make it look deliberately digital rather than hand-drawn.`;
+        workflow[nodeId].inputs.text = getPictionaryPrompt(prompt);
       }
     }
 
