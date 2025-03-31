@@ -301,7 +301,7 @@ function createHtmlIndex(numRounds) {
 }
 
 // Main function to run the game
-async function runGame(numRounds = 10) {
+async function runGame(numRounds = 10, startWord = null) {
   try {
     // Check if ComfyUI server is running
     const serverRunning = await checkComfyUIServer();
@@ -312,10 +312,10 @@ async function runGame(numRounds = 10) {
       return null;
     }
 
-    // Select a random starter word
-    const startingWord =
+    // Use provided start word or select a random starter word
+    let currentWord =
+      startWord ||
       STARTER_WORDS[Math.floor(Math.random() * STARTER_WORDS.length)];
-    let currentWord = startingWord;
 
     console.log("\n🎮 PICTIONARY CHAIN GAME 🎮");
     console.log("=========================");
@@ -391,8 +391,11 @@ if (OPENAI_API_KEY === "your-api-key-here") {
   process.exit(1);
 }
 
-// Run the game with 10 rounds
-runGame(10)
+// Parse command line arguments
+const customStartWord = process.argv[2];
+
+// Run the game with 10 rounds and optional custom start word
+runGame(10, customStartWord)
   .then((gameDir) => {
     if (gameDir) {
       console.log("\nGame files are in:", gameDir);
