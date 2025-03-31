@@ -116,17 +116,26 @@ def update_image_paths(image_dir):
     
     print(f"Looking for images in: {image_dir}")
     
-    # Check for each image and update the path
+    # Get all files in the directory
+    all_files = os.listdir(image_dir)
+    
+    # Check for each round and find matching images
     for round_data in rounds_data:
-        image_name = round_data["image"]
-        full_path = os.path.join(image_dir, image_name)
+        round_num = round_data["number"]
+        pattern = f"round_{round_num}_"
         
-        if os.path.exists(full_path):
+        # Find all files that start with the pattern
+        matching_files = [f for f in all_files if f.lower().startswith(pattern.lower())]
+        
+        if matching_files:
+            # Use the first matching file
+            image_name = matching_files[0]
+            full_path = os.path.join(image_dir, image_name)
             round_data["image"] = full_path
-            print(f"Found image: {image_name}")
+            print(f"Found image for round {round_num}: {image_name}")
         else:
-            print(f"Warning: Image not found: {image_name}")
-            # Keep the original filename, but it won't be found
+            print(f"Warning: No image found for round {round_num} (pattern: {pattern}*)")
+            # Keep the original filename as a fallback, but it likely won't be found
     
     return True
 
