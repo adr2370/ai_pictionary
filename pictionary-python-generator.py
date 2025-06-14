@@ -20,6 +20,9 @@ GUESS_COLOR = (255, 50, 50)  # Red
 DEFAULT_DURATION = 3  # Default duration for each card (seconds)
 DEFAULT_FPS = 30  # Default frames per second
 FADE_FRAMES = 15  # Number of frames for fade effects
+SCROLL_SPEED = 50  # Increased for faster scrolling
+TEXT_PADDING = 30  # Reduced padding between elements
+SCROLL_ANIMATION_FRAMES = 15  # Number of frames for smooth scroll animation
 
 # Font will be determined at runtime
 FONT_PATH = None  
@@ -82,26 +85,22 @@ def get_default_font():
             os.path.expanduser('~/.fonts')
         ]
     
-    # Check for PIL's default font
-    try:
-        # This will use PIL's default font if available
-        default_font = ImageFont.load_default()
-        print("Using PIL's default font")
-        return default_font
-    except:
-        pass
-    
     # Try to find a system font
     for font_dir in font_dirs:
         if os.path.exists(font_dir):
             for font_name in potential_fonts:
                 font_path = os.path.join(font_dir, font_name)
                 if os.path.exists(font_path):
-                    print(f"Using system font: {font_path}")
-                    return font_path
+                    try:
+                        # Test if we can actually load the font
+                        test_font = ImageFont.truetype(font_path, 20)
+                        print(f"Using system font: {font_path}")
+                        return font_path
+                    except Exception as e:
+                        print(f"Could not load font {font_path}: {e}")
+                        continue
     
-    # If no font found, use a simple fallback approach
-    print("Warning: No system font found. Using a simplified approach.")
+    print("Warning: No system font found. Using PIL's default font.")
     return None
 
 def update_image_paths(image_dir):
@@ -226,20 +225,33 @@ def create_drawing_animation(image, progress):
     result.paste(image, (0, 0), mask)
     return result
 
-def create_text_element(text, font_size=80):
+def create_text_element(text, font_size=140):
     """Create a text element with proper sizing"""
     # Create a new image with transparent background
-    text_img = Image.new('RGBA', (VIDEO_WIDTH, 150), (0, 0, 0, 0))
+    text_img = Image.new('RGBA', (VIDEO_WIDTH, 160), (0, 0, 0, 0))  # Reduced height
     draw = ImageDraw.Draw(text_img)
     
     # Load font
-    try:
-        if FONT_PATH:
+    font = None
+    if FONT_PATH:
+        try:
             font = ImageFont.truetype(FONT_PATH, font_size)
-        else:
+        except Exception as e:
+            print(f"Error loading specified font: {e}")
+    
+    if not font:
+        try:
+            # Try to load a system font
+            system_font = get_default_font()
+            if system_font:
+                font = ImageFont.truetype(system_font, font_size)
+            else:
+                # If all else fails, use PIL's default font
+                font = ImageFont.load_default()
+                print("Using PIL's default font - text may appear small")
+        except Exception as e:
+            print(f"Error loading system font: {e}")
             font = ImageFont.load_default()
-    except:
-        font = ImageFont.load_default()
     
     # Calculate text size
     try:
@@ -248,7 +260,7 @@ def create_text_element(text, font_size=80):
         text_width = len(text) * font_size * 0.6
     
     # Draw the text
-    draw.text(((VIDEO_WIDTH - text_width) // 2, 35), 
+    draw.text(((VIDEO_WIDTH - text_width) // 2, 30),  # Adjusted y offset
               text, fill=(255, 255, 255, 255), font=font)
     
     return text_img
@@ -260,6 +272,13 @@ def generate_frames():
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
     
     print(f"Creating {TOTAL_FRAMES} frames for {TOTAL_ROUNDS} rounds...")
+    
+    # Track the scroll position
+    current_scroll = 0
+    target_scroll = 0
+    last_round = -1  # Track when we change rounds
+    scroll_start = 0  # Track where scroll animation started
+    scroll_frames = 0  # Track frames since scroll started
     
     for frame in range(TOTAL_FRAMES):
         # Create base image with background
@@ -277,9 +296,9 @@ def generate_frames():
             if round_idx < len(all_rounds):
                 round_data = all_rounds[round_idx]
                 
-                # Add prompt text for each round
-                prompt_text = f"Draw: {round_data['prompt']}"
-                text_img = create_text_element(prompt_text)
+                # Add combined prompt and guess text
+                text = f"{round_data['prompt']}"
+                text_img = create_text_element(text)
                 visible_elements.append({
                     'type': 'text',
                     'image': text_img,
@@ -309,27 +328,41 @@ def generate_frames():
                         })
                     except Exception as e:
                         print(f"Error processing image: {e}")
-                
-                # Add guess text for each round
-                guess_text = f"AI guessed: {round_data['guess']}"
-                text_img = create_text_element(guess_text)
-                visible_elements.append({
-                    'type': 'text',
-                    'image': text_img,
-                    'y_offset': 0
-                })
         
         # Calculate total height of all elements
-        total_height = sum(elem['image'].height for elem in visible_elements)
+        total_height = sum(elem['image'].height + TEXT_PADDING for elem in visible_elements)
         
-        # If total height exceeds screen height, start scrolling
+        # Update target scroll position if needed
         if total_height > VIDEO_HEIGHT:
-            scroll_offset = total_height - VIDEO_HEIGHT
-            # Adjust y_offset for each element
-            current_y = 0
-            for elem in visible_elements:
-                elem['y_offset'] = current_y - scroll_offset
-                current_y += elem['image'].height
+            target_scroll = total_height - VIDEO_HEIGHT
+        else:
+            target_scroll = 0
+        
+        # Check if we've changed rounds
+        if current_round != last_round:
+            # When a new round starts, start a smooth scroll animation
+            scroll_start = current_scroll
+            scroll_frames = 0
+            last_round = current_round
+        
+        # Handle smooth scrolling animation
+        if scroll_frames < SCROLL_ANIMATION_FRAMES:
+            # Calculate progress of scroll animation (0 to 1)
+            scroll_progress = scroll_frames / SCROLL_ANIMATION_FRAMES
+            # Use ease-out cubic function for smooth deceleration
+            scroll_progress = 1 - (1 - scroll_progress) ** 3
+            # Interpolate between start and target scroll position
+            current_scroll = scroll_start + (target_scroll - scroll_start) * scroll_progress
+            scroll_frames += 1
+        else:
+            # After animation, maintain target scroll position
+            current_scroll = target_scroll
+        
+        # Position elements with smooth scrolling
+        current_y = 0
+        for elem in visible_elements:
+            elem['y_offset'] = current_y - current_scroll
+            current_y += elem['image'].height + TEXT_PADDING
         
         # Draw all visible elements
         for elem in visible_elements:
@@ -338,8 +371,9 @@ def generate_frames():
                 # Only draw if element is visible on screen
                 if elem['type'] == 'image':
                     # For images, apply the drawing animation only to the current round's image
-                    if visible_elements.index(elem) == len(visible_elements) - 2:  # -2 because the last element is the guess text
-                        progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.8))
+                    if visible_elements.index(elem) == len(visible_elements) - 1:  # Changed from -2 to -1 since we removed one text element
+                        # Speed up the animation by reducing the time it takes to complete
+                        progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.3))
                         animated_img = create_drawing_animation(elem['image'], progress)
                         image.paste(animated_img, (0, int(y_pos)), animated_img)
                     else:
