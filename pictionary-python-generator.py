@@ -1,7 +1,7 @@
 import os
 import subprocess
 import argparse
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math
 import sys
 import datetime
@@ -50,7 +50,6 @@ TOTAL_ROUNDS = 0
 DURATION = DEFAULT_DURATION
 FPS = DEFAULT_FPS
 
-# Get a system font that should be available
 def get_default_font():
     """Find a default system font that's available"""
     # Try common fonts available on different systems
@@ -175,52 +174,6 @@ def draw_card(image, round_data, y_position, opacity=255):
     """Draw a single round card at the specified y position with given opacity"""
     draw = ImageDraw.Draw(image, 'RGBA')
     
-    # Card background (rounded rectangle)
-    card_color = (40, 40, 40, opacity)
-    card_x = 80
-    card_y = y_position
-    
-    # Draw card background with opacity
-    draw.rectangle([card_x, card_y, card_x + CARD_WIDTH, card_y + CARD_HEIGHT], 
-                  fill=card_color, outline=(80, 80, 80, opacity), width=3)
-    
-    # Prepare fonts (handling potential font errors)
-    try:
-        if FONT_PATH:
-            round_font = ImageFont.truetype(FONT_PATH, 60)
-            prompt_font = ImageFont.truetype(FONT_PATH, 50)
-            guess_label_font = ImageFont.truetype(FONT_PATH, 50)
-            guess_font = ImageFont.truetype(FONT_PATH, 70)
-        else:
-            # Use default font with different sizes
-            round_font = ImageFont.load_default()
-            prompt_font = ImageFont.load_default()
-            guess_label_font = ImageFont.load_default()
-            guess_font = ImageFont.load_default()
-    except:
-        # Fallback to default font if any error occurs
-        round_font = ImageFont.load_default()
-        prompt_font = ImageFont.load_default()
-        guess_label_font = ImageFont.load_default()
-        guess_font = ImageFont.load_default()
-    
-    # Draw round number
-    draw.text((card_x + 30, card_y + 30), f"Round {round_data['number']}", 
-              fill=(255, 255, 255, opacity), font=round_font)
-    
-    # Draw prompt
-    prompt_text = f"Prompt: \"{round_data['prompt']}\""
-    draw.text((card_x + 30, card_y + 120), prompt_text, 
-              fill=(HIGHLIGHT_COLOR[0], HIGHLIGHT_COLOR[1], HIGHLIGHT_COLOR[2], opacity), font=prompt_font)
-    
-    # Place for image (centered)
-    image_box_top = card_y + 200
-    image_box_height = 350
-    
-    # Draw image placeholder (would be replaced with actual image)
-    draw.rectangle([card_x + 30, image_box_top, card_x + CARD_WIDTH - 30, image_box_top + image_box_height], 
-                  fill=(20, 20, 20, opacity), outline=(60, 60, 60, opacity), width=2)
-    
     # If we have the image path, try to composite it
     if 'image' in round_data and os.path.exists(round_data['image']):
         try:
@@ -228,13 +181,12 @@ def draw_card(image, round_data, y_position, opacity=255):
             round_img = Image.open(round_data['image']).convert('RGBA')
             img_width, img_height = round_img.size
             
-            # Calculate dimensions to fit in the box while maintaining aspect ratio
-            img_box_width = CARD_WIDTH - 60
-            ratio = min(img_box_width / img_width, image_box_height / img_height)
+            # Calculate dimensions to fit the screen while maintaining aspect ratio
+            ratio = min(VIDEO_WIDTH / img_width, VIDEO_HEIGHT / img_height)
             new_width = int(img_width * ratio)
             new_height = int(img_height * ratio)
             
-            # Resize image - ensure integer values for size
+            # Resize image
             round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # Adjust opacity if needed
@@ -244,78 +196,155 @@ def draw_card(image, round_data, y_position, opacity=255):
                 r, g, b = round_img.split()[:3]
                 round_img = Image.merge('RGBA', (r, g, b, alpha))
             
-            # Calculate position to center the image in the box - ensure integers
-            img_x = int(card_x + 30 + (img_box_width - new_width) // 2)
-            img_y = int(image_box_top + (image_box_height - new_height) // 2)
+            # Calculate position to center the image
+            img_x = int((VIDEO_WIDTH - new_width) // 2)
+            img_y = int((VIDEO_HEIGHT - new_height) // 2)
             
             # Paste the image onto the frame
             image.paste(round_img, (img_x, img_y), round_img)
         except Exception as e:
             print(f"Error placing image: {e}")
-            # Draw error text in the image box
-            draw.text((card_x + 50, image_box_top + 50), f"Image loading error: {round_data['image']}", 
-                      fill=(255, 0, 0, opacity), font=prompt_font)
+            # Draw error text in the center
+            draw.text((VIDEO_WIDTH//2 - 100, VIDEO_HEIGHT//2), f"Image loading error: {round_data['image']}", 
+                      fill=(255, 0, 0, opacity), font=ImageFont.load_default())
+
+def create_drawing_animation(image, progress):
+    """Create a drawing animation effect by gradually revealing the image"""
+    # Create a mask for the drawing effect
+    mask = Image.new('L', image.size, 0)
+    draw = ImageDraw.Draw(mask)
     
-    # Draw AI's guess
-    draw.text((card_x + 30, card_y + CARD_HEIGHT - 150), "AI's wrong guess:", 
-              fill=(GUESS_COLOR[0], GUESS_COLOR[1], GUESS_COLOR[2], opacity), font=guess_label_font)
+    # Calculate the number of lines to draw based on progress
+    num_lines = int(image.height * progress)
     
-    draw.text((card_x + 30, card_y + CARD_HEIGHT - 90), f"\"{round_data['guess']}\"", 
-              fill=(255, 255, 255, opacity), font=guess_font)
+    # Draw horizontal lines to create a drawing effect
+    for y in range(num_lines):
+        draw.line([(0, y), (image.width, y)], fill=255)
+    
+    # Apply the mask to the image
+    result = Image.new('RGBA', image.size, (0, 0, 0, 0))
+    result.paste(image, (0, 0), mask)
+    return result
+
+def create_text_element(text, font_size=80):
+    """Create a text element with proper sizing"""
+    # Create a new image with transparent background
+    text_img = Image.new('RGBA', (VIDEO_WIDTH, 150), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_img)
+    
+    # Load font
+    try:
+        if FONT_PATH:
+            font = ImageFont.truetype(FONT_PATH, font_size)
+        else:
+            font = ImageFont.load_default()
+    except:
+        font = ImageFont.load_default()
+    
+    # Calculate text size
+    try:
+        text_width = draw.textlength(text, font=font)
+    except:
+        text_width = len(text) * font_size * 0.6
+    
+    # Draw the text
+    draw.text(((VIDEO_WIDTH - text_width) // 2, 35), 
+              text, fill=(255, 255, 255, 255), font=font)
+    
+    return text_img
 
 def generate_frames():
     """Generate all frames for the animation"""
-    # Calculate total content height for scrolling
-    TOTAL_CONTENT_HEIGHT = TITLE_HEIGHT + (CARD_HEIGHT + CARD_PADDING) * TOTAL_ROUNDS
-    TOTAL_FRAMES = DURATION * FPS * TOTAL_ROUNDS
+    # Calculate total frames needed
+    frames_per_round = int(DURATION * FPS)
+    TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
     
     print(f"Creating {TOTAL_FRAMES} frames for {TOTAL_ROUNDS} rounds...")
-    
-    current_frame = 0
-    
-    # Calculate how much to scroll per frame for smooth scrolling
-    scroll_per_frame = TOTAL_CONTENT_HEIGHT / TOTAL_FRAMES
     
     for frame in range(TOTAL_FRAMES):
         # Create base image with background
         image = Image.new('RGB', (VIDEO_WIDTH, VIDEO_HEIGHT), BACKGROUND_COLOR)
-        draw = ImageDraw.Draw(image)
         
-        # Calculate current scroll position
-        scroll_y = frame * scroll_per_frame
+        # Calculate which round we're on and the progress within that round
+        current_round = frame // frames_per_round
+        round_progress = (frame % frames_per_round) / frames_per_round
         
-        # Draw title (fixed position)
-        title_y = max(0, scroll_y)
-        if title_y < VIDEO_HEIGHT:  # Only draw if visible
-            create_title_text(draw, None, -title_y)
+        # Keep track of visible elements for this frame
+        visible_elements = []
         
-        # Determine which rounds are visible
-        start_y = TITLE_HEIGHT - scroll_y + CARD_PADDING
-        
-        for i, round_data in enumerate(all_rounds):
-            card_y = start_y + i * (CARD_HEIGHT + CARD_PADDING)
+        if current_round < len(all_rounds):
+            round_data = all_rounds[current_round]
             
-            # Only draw cards partially or fully visible
-            if card_y + CARD_HEIGHT > 0 and card_y < VIDEO_HEIGHT:
-                # Calculate fade effect for cards entering/exiting screen
-                opacity = 255
-                if card_y < 100:
-                    # Fading in from top
-                    opacity = int(255 * (card_y + CARD_HEIGHT) / 200)
-                elif card_y + CARD_HEIGHT > VIDEO_HEIGHT - 100:
-                    # Fading out at bottom
-                    opacity = int(255 * (VIDEO_HEIGHT - card_y) / 200)
-                
-                opacity = max(0, min(255, opacity))
-                draw_card(image, round_data, card_y, opacity)
+            # Add new elements based on progress
+            if round_progress < 0.1:
+                # Add prompt text at the top
+                prompt_text = f"Draw: {round_data['prompt']}"
+                text_img = create_text_element(prompt_text)
+                visible_elements.append({
+                    'type': 'text',
+                    'image': text_img,
+                    'y_offset': 0
+                })
+            
+            # Load and prepare the image
+            if 'image' in round_data and os.path.exists(round_data['image']):
+                try:
+                    # Load and prepare the image
+                    round_img = Image.open(round_data['image']).convert('RGBA')
+                    img_width, img_height = round_img.size
+                    
+                    # Calculate dimensions to fit the screen width
+                    ratio = VIDEO_WIDTH / img_width
+                    new_width = int(img_width * ratio)
+                    new_height = int(img_height * ratio)
+                    
+                    # Resize image
+                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                    
+                    # Add to visible elements
+                    visible_elements.append({
+                        'type': 'image',
+                        'image': round_img,  # Store the original image
+                        'y_offset': 0
+                    })
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+            
+            # Add guess text near the end of the round
+            if round_progress > 0.8:
+                guess_text = f"AI guessed: {round_data['guess']}"
+                text_img = create_text_element(guess_text)
+                visible_elements.append({
+                    'type': 'text',
+                    'image': text_img,
+                    'y_offset': 0
+                })
         
-        # Add frame counter for tracking (using default font)
-        try:
-            counter_font = ImageFont.load_default()
-            draw.text((10, 10), f"Frame: {frame}/{TOTAL_FRAMES}", fill=(128, 128, 128), font=counter_font)
-        except:
-            # Skip counter if font fails
-            pass
+        # Calculate total height of all elements
+        total_height = sum(elem['image'].height for elem in visible_elements)
+        
+        # If total height exceeds screen height, start scrolling
+        if total_height > VIDEO_HEIGHT:
+            scroll_offset = total_height - VIDEO_HEIGHT
+            # Adjust y_offset for each element
+            current_y = 0
+            for elem in visible_elements:
+                elem['y_offset'] = current_y - scroll_offset
+                current_y += elem['image'].height
+        
+        # Draw all visible elements
+        for elem in visible_elements:
+            y_pos = elem['y_offset']
+            if y_pos < VIDEO_HEIGHT and y_pos + elem['image'].height > 0:
+                # Only draw if element is visible on screen
+                if elem['type'] == 'image':
+                    # For images, apply the drawing animation
+                    progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.8))
+                    animated_img = create_drawing_animation(elem['image'], progress)
+                    image.paste(animated_img, (0, int(y_pos)), animated_img)
+                else:
+                    # For text, just paste it
+                    image.paste(elem['image'], (0, int(y_pos)), elem['image'])
         
         # Save the frame
         frame_path = f"temp_frames/frame_{frame:05d}.png"
