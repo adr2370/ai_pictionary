@@ -272,12 +272,12 @@ def generate_frames():
         # Keep track of visible elements for this frame
         visible_elements = []
         
-        if current_round < len(all_rounds):
-            round_data = all_rounds[current_round]
-            
-            # Add new elements based on progress
-            if round_progress < 0.1:
-                # Add prompt text at the top
+        # Add elements from all previous rounds and current round
+        for round_idx in range(current_round + 1):
+            if round_idx < len(all_rounds):
+                round_data = all_rounds[round_idx]
+                
+                # Add prompt text for each round
                 prompt_text = f"Draw: {round_data['prompt']}"
                 text_img = create_text_element(prompt_text)
                 visible_elements.append({
@@ -285,33 +285,32 @@ def generate_frames():
                     'image': text_img,
                     'y_offset': 0
                 })
-            
-            # Load and prepare the image
-            if 'image' in round_data and os.path.exists(round_data['image']):
-                try:
-                    # Load and prepare the image
-                    round_img = Image.open(round_data['image']).convert('RGBA')
-                    img_width, img_height = round_img.size
-                    
-                    # Calculate dimensions to fit the screen width
-                    ratio = VIDEO_WIDTH / img_width
-                    new_width = int(img_width * ratio)
-                    new_height = int(img_height * ratio)
-                    
-                    # Resize image
-                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                    
-                    # Add to visible elements
-                    visible_elements.append({
-                        'type': 'image',
-                        'image': round_img,  # Store the original image
-                        'y_offset': 0
-                    })
-                except Exception as e:
-                    print(f"Error processing image: {e}")
-            
-            # Add guess text near the end of the round
-            if round_progress > 0.8:
+                
+                # Load and prepare the image
+                if 'image' in round_data and os.path.exists(round_data['image']):
+                    try:
+                        # Load and prepare the image
+                        round_img = Image.open(round_data['image']).convert('RGBA')
+                        img_width, img_height = round_img.size
+                        
+                        # Calculate dimensions to fit the screen width
+                        ratio = VIDEO_WIDTH / img_width
+                        new_width = int(img_width * ratio)
+                        new_height = int(img_height * ratio)
+                        
+                        # Resize image
+                        round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                        
+                        # Add to visible elements
+                        visible_elements.append({
+                            'type': 'image',
+                            'image': round_img,
+                            'y_offset': 0
+                        })
+                    except Exception as e:
+                        print(f"Error processing image: {e}")
+                
+                # Add guess text for each round
                 guess_text = f"AI guessed: {round_data['guess']}"
                 text_img = create_text_element(guess_text)
                 visible_elements.append({
@@ -338,10 +337,14 @@ def generate_frames():
             if y_pos < VIDEO_HEIGHT and y_pos + elem['image'].height > 0:
                 # Only draw if element is visible on screen
                 if elem['type'] == 'image':
-                    # For images, apply the drawing animation
-                    progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.8))
-                    animated_img = create_drawing_animation(elem['image'], progress)
-                    image.paste(animated_img, (0, int(y_pos)), animated_img)
+                    # For images, apply the drawing animation only to the current round's image
+                    if visible_elements.index(elem) == len(visible_elements) - 2:  # -2 because the last element is the guess text
+                        progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.8))
+                        animated_img = create_drawing_animation(elem['image'], progress)
+                        image.paste(animated_img, (0, int(y_pos)), animated_img)
+                    else:
+                        # For previous rounds' images, just paste them
+                        image.paste(elem['image'], (0, int(y_pos)), elem['image'])
                 else:
                     # For text, just paste it
                     image.paste(elem['image'], (0, int(y_pos)), elem['image'])
