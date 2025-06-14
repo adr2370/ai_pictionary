@@ -1,7 +1,7 @@
 {
   "2": {
     "inputs": {
-      "text": "A single, extremely simple Pictionary-style drawing of unicorn. Just basic black lines on plain white paper. Imagine a quick sketch made with a black marker in 10 seconds during a game of Pictionary. Keep it minimalist - just the essential lines needed to recognize the concept. Nothing else in the image.",
+      "text": "A single, extremely simple Pictionary-style drawing of unicorn. Just basic black lines on plain white paper. Imagine a quick sketch made with a black marker in 10 seconds during a game of Pictionary. Keep it minimalist - just the essential lines needed to recognize the concept. Nothing else in the image. No background outline.",
       "clip": ["8", 1]
     },
     "class_type": "CLIPTextEncode",

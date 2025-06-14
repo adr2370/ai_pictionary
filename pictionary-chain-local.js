@@ -165,12 +165,15 @@ function encodeImage(imagePath) {
 }
 
 // Function to get a deliberately incorrect but plausible guess for the image
-async function getPlausibleWrongGuess(imagePath, actualWord) {
+async function getPlausibleWrongGuess(imagePath, actualWord, usedWords) {
   try {
     console.log("Analyzing image and generating a plausible wrong guess...");
     logToFile("Analyzing image and generating a plausible wrong guess...");
 
     const base64Image = encodeImage(imagePath);
+
+    // Convert usedWords Set to an array for the prompt
+    const usedWordsList = Array.from(usedWords).join('", "');
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -179,7 +182,7 @@ async function getPlausibleWrongGuess(imagePath, actualWord) {
         messages: [
           {
             role: "system",
-            content: `You are an AI playing Pictionary. Your job is to analyze the drawing and provide a DELIBERATELY INCORRECT but plausible guess - something that's close enough that a human might reasonably guess it when seeing the drawing, but definitely not the exact right answer. The actual word represented is "${actualWord}", so do NOT say this as your guess. Make your guess a single word or short phrase like a real Pictionary player would.`,
+            content: `You are an AI playing Pictionary. Your job is to analyze the drawing and provide a DELIBERATELY INCORRECT but plausible guess - something that's close enough that a human might reasonably guess it when seeing the drawing, but definitely not the exact right answer. The actual word represented is "${actualWord}", so do NOT say this as your guess. Additionally, you must NOT use any of these previously used words: "${usedWordsList}". Make your guess a single word or short phrase like a real Pictionary player would.`,
           },
           {
             role: "user",
@@ -207,7 +210,20 @@ async function getPlausibleWrongGuess(imagePath, actualWord) {
       }
     );
 
-    return response.data.choices[0].message.content.trim();
+    const guess = response.data.choices[0].message.content.trim();
+
+    // Double check that the guess isn't in usedWords (case insensitive)
+    const normalizedGuess = guess.toLowerCase();
+    if (
+      Array.from(usedWords).some(
+        (word) => word.toLowerCase() === normalizedGuess
+      )
+    ) {
+      // If the guess is in usedWords, try again with a more explicit prompt
+      return getPlausibleWrongGuess(imagePath, actualWord, usedWords);
+    }
+
+    return guess;
   } catch (error) {
     console.error("Error analyzing image:");
     if (error.response) {
@@ -317,6 +333,9 @@ async function runGame(numRounds = 10, startWord = null) {
       startWord ||
       STARTER_WORDS[Math.floor(Math.random() * STARTER_WORDS.length)];
 
+    // Keep track of all words used in the game
+    const usedWords = new Set([currentWord]);
+
     console.log("\n🎮 PICTIONARY CHAIN GAME 🎮");
     console.log("=========================");
     console.log(`Starting word: "${currentWord}"`);
@@ -338,7 +357,11 @@ async function runGame(numRounds = 10, startWord = null) {
       }
 
       // Get a wrong guess based on the image
-      const wrongGuess = await getPlausibleWrongGuess(imagePath, currentWord);
+      const wrongGuess = await getPlausibleWrongGuess(
+        imagePath,
+        currentWord,
+        usedWords
+      );
       if (!wrongGuess) {
         console.error(
           `Failed to get a wrong guess for round ${round}. Stopping game.`
@@ -348,6 +371,9 @@ async function runGame(numRounds = 10, startWord = null) {
         );
         break;
       }
+
+      // Add the wrong guess to used words
+      usedWords.add(wrongGuess);
 
       console.log(`🤔 Wrong guess: "${wrongGuess}"`);
       logToFile(`AI's wrong guess: "${wrongGuess}"\n`);
