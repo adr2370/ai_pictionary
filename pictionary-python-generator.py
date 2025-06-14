@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import math
 import sys
 import datetime
+import re
 
 # Create directories
 os.makedirs("temp_frames", exist_ok=True)
@@ -296,7 +297,7 @@ def generate_frames():
             if round_idx < len(all_rounds):
                 round_data = all_rounds[round_idx]
                 
-                # Add combined prompt and guess text
+                # Add prompt text
                 text = f"{round_data['prompt']}"
                 text_img = create_text_element(text)
                 visible_elements.append({
@@ -507,11 +508,52 @@ def cleanup():
     except Exception as e:
         print(f"Note: Some temporary files may remain. Manual cleanup recommended. Error: {e}")
 
+def read_game_log(game_dir):
+    """Read the game log directory and return rounds data"""
+    if not os.path.isdir(game_dir):
+        print(f"Error: Game directory '{game_dir}' not found!")
+        return None
+    
+    rounds_data = []
+    round_files = {}
+    
+    # First, collect all files and organize them by round number
+    for file in os.listdir(game_dir):
+        if file.startswith("round_") and file.endswith(".png"):
+            round_num = int(file.split("_")[1])
+            if round_num not in round_files:
+                round_files[round_num] = {}
+            round_files[round_num]["image"] = os.path.join(game_dir, file)
+        elif file.startswith("round_") and file.endswith("_summary.txt"):
+            round_num = int(file.split("_")[1])
+            if round_num not in round_files:
+                round_files[round_num] = {}
+            round_files[round_num]["summary"] = os.path.join(game_dir, file)
+    
+    # Process each round in order
+    for round_num in sorted(round_files.keys()):
+        round_data = round_files[round_num]
+        if "summary" in round_data and "image" in round_data:
+            # Read the summary file to get the prompt
+            with open(round_data["summary"], "r") as f:
+                summary_content = f.read()
+                # Extract the actual word from the summary
+                actual_word_match = re.search(r"Actual Word: (.*)", summary_content)
+                if actual_word_match:
+                    prompt = actual_word_match.group(1).strip()
+                    rounds_data.append({
+                        "number": round_num,
+                        "prompt": prompt,
+                        "image": round_data["image"]
+                    })
+    
+    return rounds_data
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Generate a TikTok video from Pictionary Chain Game images')
-    parser.add_argument('--image-dir', '-i', type=str, default='.',
-                        help='Directory containing the image files (default: current directory)')
+    parser.add_argument('--game-dir', '-g', type=str, required=True,
+                        help='Directory containing the game log files')
     parser.add_argument('--duration', '-d', type=float, default=DEFAULT_DURATION,
                         help=f'Duration for each round in seconds (default: {DEFAULT_DURATION})')
     parser.add_argument('--fps', '-f', type=int, default=DEFAULT_FPS,
@@ -553,12 +595,12 @@ def main():
     
     print("Starting Pictionary Chain TikTok Generator")
     
-    # Update image paths
-    if not update_image_paths(args.image_dir):
-        print("Failed to find images. Please check the directory path.")
+    # Read game log data
+    all_rounds = read_game_log(args.game_dir)
+    if not all_rounds:
+        print("Failed to read game log data. Please check the game directory path.")
         return
     
-    all_rounds = rounds_data
     TOTAL_ROUNDS = len(all_rounds)
     print(f"Creating animation with {TOTAL_ROUNDS} rounds")
     
