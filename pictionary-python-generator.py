@@ -23,7 +23,6 @@ DEFAULT_FPS = 30  # Default frames per second
 FADE_FRAMES = 15  # Number of frames for fade effects
 SCROLL_SPEED = 50  # Increased for faster scrolling
 TEXT_PADDING = 30  # Reduced padding between elements
-TEXT_BOTTOM_PADDING = 60  # Added padding below text
 SCROLL_ANIMATION_FRAMES = 15  # Number of frames for smooth scroll animation
 LOADING_DOT_COUNT = 3  # Number of dots in loading animation
 
@@ -258,7 +257,7 @@ def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
 def create_text_element(text, font_size=140):
     """Create a text element with proper sizing"""
     # Create a new image with transparent background
-    text_img = Image.new('RGBA', (VIDEO_WIDTH, 160 + TEXT_BOTTOM_PADDING), (0, 0, 0, 0))  # Added bottom padding
+    text_img = Image.new('RGBA', (VIDEO_WIDTH, 220), (0, 0, 0, 0))
     draw = ImageDraw.Draw(text_img)
     
     # Load font
@@ -387,7 +386,8 @@ def generate_frames():
                                     'type': 'image',
                                     'image': animated_img,
                                     'y_offset': 0,
-                                    'opacity': 255
+                                    'opacity': 255,
+                                    'drawing_progress': drawing_progress
                                 })
                             except Exception as e:
                                 print(f"Error processing image: {e}")
@@ -422,7 +422,17 @@ def generate_frames():
                             print(f"Error processing image: {e}")
         
         # Calculate total height and handle scrolling
-        total_height = sum(elem['image'].height + TEXT_PADDING for elem in visible_elements)
+        total_height = 0
+        for i, elem in enumerate(visible_elements):
+            if elem['type'] == 'image' and elem.get('drawing_progress', 1.0) < 1.0:
+                # For images being drawn, use the actual drawn height
+                drawn_height = int(elem['image'].height * elem['drawing_progress'])
+                # Add padding only to the drawn portion
+                total_height += drawn_height + (TEXT_PADDING if drawn_height > 0 and i < len(visible_elements) - 1 else 0)
+            else:
+                # For completed images and other elements, use full height
+                total_height += elem['image'].height + (TEXT_PADDING if i < len(visible_elements) - 1 else 0)
+        
         target_scroll = max(0, total_height - VIDEO_HEIGHT)
         
         if current_round != last_round:
