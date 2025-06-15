@@ -14,10 +14,10 @@ os.makedirs("temp_assets", exist_ok=True)
 # Constants
 VIDEO_WIDTH = 1080  # TikTok vertical video width
 VIDEO_HEIGHT = 1920  # TikTok vertical video height
-BACKGROUND_COLOR = (0, 0, 0)  # Black
-TEXT_COLOR = (255, 255, 255)  # White
-HIGHLIGHT_COLOR = (255, 255, 0)  # Yellow
-GUESS_COLOR = (255, 50, 50)  # Red
+BACKGROUND_COLOR = (255, 255, 255)  # White
+TEXT_COLOR = (33, 33, 33)  # Dark gray, almost black
+HIGHLIGHT_COLOR = (0, 120, 212)  # Blue
+GUESS_COLOR = (220, 53, 69)  # Red
 DEFAULT_DURATION = 3  # Default duration for each card (seconds)
 DEFAULT_FPS = 30  # Default frames per second
 FADE_FRAMES = 15  # Number of frames for fade effects
@@ -250,8 +250,8 @@ def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
         dot_progress = (progress + (i / dot_count)) % 1.0
         opacity = int(255 * (0.3 + 0.7 * abs(math.sin(dot_progress * math.pi))))
         
-        # Draw dot
-        draw.ellipse([x-4, y-4, x+4, y+4], fill=(255, 255, 255, opacity))
+        # Draw dot with dark color
+        draw.ellipse([x-4, y-4, x+4, y+4], fill=(*TEXT_COLOR, opacity))
     
     return loading_img
 
@@ -289,9 +289,9 @@ def create_text_element(text, font_size=140):
     except:
         text_width = len(text) * font_size * 0.6
     
-    # Draw the text
+    # Draw the text with dark color
     draw.text(((VIDEO_WIDTH - text_width) // 2, 30),  # Adjusted y offset
-              text, fill=(255, 255, 255, 255), font=font)
+              text, fill=(*TEXT_COLOR, 255), font=font)
     
     return text_img
 
