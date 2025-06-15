@@ -268,8 +268,13 @@ def create_text_element(text, font_size=140):
 
 def generate_frames():
     """Generate all frames for the animation"""
-    # Calculate total frames needed
+    # Calculate timing for each phase
     frames_per_round = int(DURATION * FPS)
+    text_phase = int(frames_per_round * 0.3)     # 30% for text display
+    image_delay = int(frames_per_round * 0.1)    # 10% delay before image
+    drawing_phase = int(frames_per_round * 0.4)  # 40% of time for drawing
+    transition_phase = int(frames_per_round * 0.2)  # 20% for transition
+    
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
     
     print(f"Creating {TOTAL_FRAMES} frames for {TOTAL_ROUNDS} rounds...")
@@ -277,9 +282,9 @@ def generate_frames():
     # Track the scroll position
     current_scroll = 0
     target_scroll = 0
-    last_round = -1  # Track when we change rounds
-    scroll_start = 0  # Track where scroll animation started
-    scroll_frames = 0  # Track frames since scroll started
+    last_round = -1
+    scroll_start = 0
+    scroll_frames = 0
     
     for frame in range(TOTAL_FRAMES):
         # Create base image with background
@@ -288,6 +293,7 @@ def generate_frames():
         # Calculate which round we're on and the progress within that round
         current_round = frame // frames_per_round
         round_progress = (frame % frames_per_round) / frames_per_round
+        frame_in_round = frame % frames_per_round
         
         # Keep track of visible elements for this frame
         visible_elements = []
@@ -297,66 +303,87 @@ def generate_frames():
             if round_idx < len(all_rounds):
                 round_data = all_rounds[round_idx]
                 
-                # Add prompt text
-                text = f"{round_data['prompt']}"
-                text_img = create_text_element(text)
-                visible_elements.append({
-                    'type': 'text',
-                    'image': text_img,
-                    'y_offset': 0
-                })
-                
-                # Load and prepare the image
-                if 'image' in round_data and os.path.exists(round_data['image']):
-                    try:
-                        # Load and prepare the image
-                        round_img = Image.open(round_data['image']).convert('RGBA')
-                        img_width, img_height = round_img.size
-                        
-                        # Calculate dimensions to fit the screen width
-                        ratio = VIDEO_WIDTH / img_width
-                        new_width = int(img_width * ratio)
-                        new_height = int(img_height * ratio)
-                        
-                        # Resize image
-                        round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                        
-                        # Add to visible elements
-                        visible_elements.append({
-                            'type': 'image',
-                            'image': round_img,
-                            'y_offset': 0
-                        })
-                    except Exception as e:
-                        print(f"Error processing image: {e}")
+                # For current round, handle text and image timing
+                if round_idx == current_round:
+                    # Always show the current round's text
+                    text = f"{round_data['prompt']}"
+                    text_img = create_text_element(text)
+                    visible_elements.append({
+                        'type': 'text',
+                        'image': text_img,
+                        'y_offset': 0,
+                        'opacity': 255
+                    })
+                    
+                    # Show the image only after text delay
+                    if frame_in_round >= text_phase + image_delay:
+                        if 'image' in round_data and os.path.exists(round_data['image']):
+                            try:
+                                round_img = Image.open(round_data['image']).convert('RGBA')
+                                img_width, img_height = round_img.size
+                                
+                                ratio = VIDEO_WIDTH / img_width
+                                new_width = int(img_width * ratio)
+                                new_height = int(img_height * ratio)
+                                
+                                round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                
+                                # Calculate drawing progress
+                                drawing_progress = min(1.0, (frame_in_round - (text_phase + image_delay)) / drawing_phase)
+                                animated_img = create_drawing_animation(round_img, drawing_progress)
+                                visible_elements.append({
+                                    'type': 'image',
+                                    'image': animated_img,
+                                    'y_offset': 0,
+                                    'opacity': 255
+                                })
+                            except Exception as e:
+                                print(f"Error processing image: {e}")
+                else:
+                    # For previous rounds, show both text and image
+                    text = f"{round_data['prompt']}"
+                    text_img = create_text_element(text)
+                    visible_elements.append({
+                        'type': 'text',
+                        'image': text_img,
+                        'y_offset': 0,
+                        'opacity': 255
+                    })
+                    
+                    if 'image' in round_data and os.path.exists(round_data['image']):
+                        try:
+                            round_img = Image.open(round_data['image']).convert('RGBA')
+                            img_width, img_height = round_img.size
+                            
+                            ratio = VIDEO_WIDTH / img_width
+                            new_width = int(img_width * ratio)
+                            new_height = int(img_height * ratio)
+                            
+                            round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                            visible_elements.append({
+                                'type': 'image',
+                                'image': round_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                        except Exception as e:
+                            print(f"Error processing image: {e}")
         
-        # Calculate total height of all elements
+        # Calculate total height and handle scrolling
         total_height = sum(elem['image'].height + TEXT_PADDING for elem in visible_elements)
+        target_scroll = max(0, total_height - VIDEO_HEIGHT)
         
-        # Update target scroll position if needed
-        if total_height > VIDEO_HEIGHT:
-            target_scroll = total_height - VIDEO_HEIGHT
-        else:
-            target_scroll = 0
-        
-        # Check if we've changed rounds
         if current_round != last_round:
-            # When a new round starts, start a smooth scroll animation
             scroll_start = current_scroll
             scroll_frames = 0
             last_round = current_round
         
-        # Handle smooth scrolling animation
         if scroll_frames < SCROLL_ANIMATION_FRAMES:
-            # Calculate progress of scroll animation (0 to 1)
             scroll_progress = scroll_frames / SCROLL_ANIMATION_FRAMES
-            # Use ease-out cubic function for smooth deceleration
             scroll_progress = 1 - (1 - scroll_progress) ** 3
-            # Interpolate between start and target scroll position
             current_scroll = scroll_start + (target_scroll - scroll_start) * scroll_progress
             scroll_frames += 1
         else:
-            # After animation, maintain target scroll position
             current_scroll = target_scroll
         
         # Position elements with smooth scrolling
@@ -369,19 +396,21 @@ def generate_frames():
         for elem in visible_elements:
             y_pos = elem['y_offset']
             if y_pos < VIDEO_HEIGHT and y_pos + elem['image'].height > 0:
-                # Only draw if element is visible on screen
                 if elem['type'] == 'image':
-                    # For images, apply the drawing animation only to the current round's image
-                    if visible_elements.index(elem) == len(visible_elements) - 1:  # Changed from -2 to -1 since we removed one text element
-                        # Speed up the animation by reducing the time it takes to complete
-                        progress = min(1.0, (frame % frames_per_round) / (frames_per_round * 0.3))
-                        animated_img = create_drawing_animation(elem['image'], progress)
-                        image.paste(animated_img, (0, int(y_pos)), animated_img)
-                    else:
-                        # For previous rounds' images, just paste them
-                        image.paste(elem['image'], (0, int(y_pos)), elem['image'])
+                    if 'opacity' in elem and elem['opacity'] < 255:
+                        # Apply opacity to image
+                        alpha = elem['image'].split()[3]
+                        alpha = alpha.point(lambda p: p * elem['opacity'] // 255)
+                        r, g, b = elem['image'].split()[:3]
+                        elem['image'] = Image.merge('RGBA', (r, g, b, alpha))
+                    image.paste(elem['image'], (0, int(y_pos)), elem['image'])
                 else:
-                    # For text, just paste it
+                    if 'opacity' in elem and elem['opacity'] < 255:
+                        # Apply opacity to text
+                        alpha = elem['image'].split()[3]
+                        alpha = alpha.point(lambda p: p * elem['opacity'] // 255)
+                        r, g, b = elem['image'].split()[:3]
+                        elem['image'] = Image.merge('RGBA', (r, g, b, alpha))
                     image.paste(elem['image'], (0, int(y_pos)), elem['image'])
         
         # Save the frame
