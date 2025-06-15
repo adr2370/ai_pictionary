@@ -23,7 +23,9 @@ DEFAULT_FPS = 30  # Default frames per second
 FADE_FRAMES = 15  # Number of frames for fade effects
 SCROLL_SPEED = 50  # Increased for faster scrolling
 TEXT_PADDING = 30  # Reduced padding between elements
+TEXT_BOTTOM_PADDING = 60  # Added padding below text
 SCROLL_ANIMATION_FRAMES = 15  # Number of frames for smooth scroll animation
+LOADING_DOT_COUNT = 3  # Number of dots in loading animation
 
 # Font will be determined at runtime
 FONT_PATH = None  
@@ -226,10 +228,37 @@ def create_drawing_animation(image, progress):
     result.paste(image, (0, 0), mask)
     return result
 
+def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
+    """Create an animated loading indicator with dots"""
+    # Create a new image for the loading indicator
+    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 40), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(loading_img)
+    
+    # Calculate dot positions and animation
+    dot_spacing = 20
+    total_width = (dot_count - 1) * dot_spacing
+    start_x = (VIDEO_WIDTH - total_width) // 2
+    
+    # Animate dots with a wave effect
+    for i in range(dot_count):
+        # Calculate dot position
+        x = start_x + (i * dot_spacing)
+        y = 20  # Center vertically
+        
+        # Calculate opacity based on animation
+        progress = (frame % total_frames) / total_frames
+        dot_progress = (progress + (i / dot_count)) % 1.0
+        opacity = int(255 * (0.3 + 0.7 * abs(math.sin(dot_progress * math.pi))))
+        
+        # Draw dot
+        draw.ellipse([x-4, y-4, x+4, y+4], fill=(255, 255, 255, opacity))
+    
+    return loading_img
+
 def create_text_element(text, font_size=140):
     """Create a text element with proper sizing"""
     # Create a new image with transparent background
-    text_img = Image.new('RGBA', (VIDEO_WIDTH, 160), (0, 0, 0, 0))  # Reduced height
+    text_img = Image.new('RGBA', (VIDEO_WIDTH, 160 + TEXT_BOTTOM_PADDING), (0, 0, 0, 0))  # Added bottom padding
     draw = ImageDraw.Draw(text_img)
     
     # Load font
@@ -270,10 +299,11 @@ def generate_frames():
     """Generate all frames for the animation"""
     # Calculate timing for each phase
     frames_per_round = int(DURATION * FPS)
-    text_phase = int(frames_per_round * 0.3)     # 30% for text display
-    image_delay = int(frames_per_round * 0.1)    # 10% delay before image
-    drawing_phase = int(frames_per_round * 0.4)  # 40% of time for drawing
-    transition_phase = int(frames_per_round * 0.2)  # 20% for transition
+    initial_loading = int(frames_per_round * 0.1)    # 10% for initial loading
+    text_phase = int(frames_per_round * 0.3)        # 30% for text display
+    image_delay = int(frames_per_round * 0.1)       # 10% delay before image
+    drawing_phase = int(frames_per_round * 0.4)     # 40% of time for drawing
+    transition_phase = int(frames_per_round * 0.1)  # 10% for transition
     
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
     
@@ -305,15 +335,37 @@ def generate_frames():
                 
                 # For current round, handle text and image timing
                 if round_idx == current_round:
-                    # Always show the current round's text
-                    text = f"{round_data['prompt']}"
-                    text_img = create_text_element(text)
-                    visible_elements.append({
-                        'type': 'text',
-                        'image': text_img,
-                        'y_offset': 0,
-                        'opacity': 255
-                    })
+                    # Show initial loading animation
+                    if frame_in_round < initial_loading:
+                        loading_img = create_loading_indicator(frame, FPS)
+                        visible_elements.append({
+                            'type': 'loading',
+                            'image': loading_img,
+                            'y_offset': 0,
+                            'opacity': 255
+                        })
+                    # Show text after initial loading
+                    elif frame_in_round >= initial_loading:
+                        text = f"{round_data['prompt']}"
+                        text_img = create_text_element(text)
+                        # Fade in text
+                        text_opacity = min(255, int((frame_in_round - initial_loading) / (text_phase * 0.2) * 255))
+                        visible_elements.append({
+                            'type': 'text',
+                            'image': text_img,
+                            'y_offset': 0,
+                            'opacity': text_opacity
+                        })
+                    
+                    # Show loading indicator during image delay
+                    if frame_in_round >= text_phase and frame_in_round < text_phase + image_delay:
+                        loading_img = create_loading_indicator(frame, FPS)
+                        visible_elements.append({
+                            'type': 'loading',
+                            'image': loading_img,
+                            'y_offset': 0,
+                            'opacity': 255
+                        })
                     
                     # Show the image only after text delay
                     if frame_in_round >= text_phase + image_delay:
@@ -406,7 +458,7 @@ def generate_frames():
                     image.paste(elem['image'], (0, int(y_pos)), elem['image'])
                 else:
                     if 'opacity' in elem and elem['opacity'] < 255:
-                        # Apply opacity to text
+                        # Apply opacity to text or loading indicator
                         alpha = elem['image'].split()[3]
                         alpha = alpha.point(lambda p: p * elem['opacity'] // 255)
                         r, g, b = elem['image'].split()[:3]
