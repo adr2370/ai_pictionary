@@ -3,3 +3,5 @@ node_modules/
 ComfyUI/
 videos/
 LoRA/quickdraw_lora_training/
+LoRA/output/
+LoRA/logs/
