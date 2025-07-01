@@ -16,14 +16,14 @@ from typing import List, Dict, Tuple
 class QuickDrawLoRAPreprocessor:
     def __init__(self, 
                  base_output_dir: str = "quickdraw_lora_training",
-                 image_size: int = 768,
+                 image_size: int = 512,
                  images_per_category: int = 50):
         """
         Initialize the preprocessor
         
         Args:
             base_output_dir: Main directory for all output
-            image_size: Size of generated images (768 recommended for LoRA)
+            image_size: Size of generated images (512 recommended for LoRA)
             images_per_category: Number of images to process per category
         """
         self.base_output_dir = base_output_dir
@@ -59,14 +59,29 @@ class QuickDrawLoRAPreprocessor:
         print(f"📊 Images per category: {self.images_per_category}")
     
     def get_popular_categories(self) -> List[str]:
-        """Return a list of popular/recognizable categories"""
+        """Return a comprehensive list of popular/recognizable categories"""
         return [
-            "cat", "dog", "bird", "fish", "horse", "cow", "pig", "sheep",
-            "tree", "flower", "grass", "apple", "banana", "strawberry",
-            "house", "car", "bicycle", "airplane", "boat", "train",
-            "sun", "moon", "star", "cloud", "mountain", "ocean",
-            "circle", "square", "triangle", "heart", "smiley face",
-            "eye", "nose", "mouth", "hand", "foot"
+            # Animals
+            "cat", "dog", "bird", "fish", "horse", "cow", "pig", "sheep", "rabbit", "elephant", 
+            "lion", "bear", "monkey", "snake", "frog", "butterfly", "bee", "spider",
+            
+            # Nature
+            "tree", "flower", "grass", "apple", "banana", "strawberry", "mushroom", "leaf",
+            "sun", "moon", "star", "cloud", "mountain", "ocean", "rain", "lightning",
+            
+            # Objects
+            "house", "car", "bicycle", "airplane", "boat", "train", "bus", "truck",
+            "chair", "table", "bed", "book", "cup", "phone", "computer", "television",
+            
+            # Shapes & Body
+            "circle", "square", "triangle", "heart", "smiley face", "eye", "nose", 
+            "mouth", "hand", "foot", "face", "person",
+            
+            # Food
+            "pizza", "hamburger", "cake", "ice cream", "donut", "bread", "cheese",
+            
+            # Tools & Items
+            "scissors", "umbrella", "key", "clock", "camera", "guitar", "piano"
         ]
     
     def download_category(self, category_name: str) -> str:
@@ -370,30 +385,131 @@ class QuickDrawLoRAPreprocessor:
         else:
             print("\n❌ No data was successfully processed!")
 
+def get_all_quickdraw_categories():
+    """Get the complete list of all 345 QuickDraw categories"""
+    # This is the complete list from the QuickDraw dataset
+    all_categories = [
+        "aircraft carrier", "airplane", "alarm clock", "ambulance", "angel", "animal migration", 
+        "ant", "anvil", "apple", "arm", "asparagus", "axe", "backpack", "banana", "bandage", 
+        "barn", "baseball", "baseball bat", "basket", "basketball", "bat", "bathtub", "beach", 
+        "bear", "beard", "bed", "bee", "belt", "bench", "bicycle", "binoculars", "bird", 
+        "birthday cake", "blackberry", "blueberry", "book", "boomerang", "bottlecap", "bowtie", 
+        "bracelet", "brain", "bread", "bridge", "broccoli", "broom", "bucket", "bulldozer", 
+        "bus", "bush", "butterfly", "cactus", "cake", "calculator", "calendar", "camel", 
+        "camera", "camouflage", "campfire", "candle", "cannon", "canoe", "car", "carrot", 
+        "castle", "cat", "ceiling fan", "cello", "cell phone", "chair", "chandelier", "church", 
+        "circle", "clarinet", "clock", "cloud", "coffee cup", "compass", "computer", "cookie", 
+        "cooler", "couch", "cow", "crab", "crayon", "crocodile", "crown", "cruise ship", 
+        "cup", "diamond", "dishwasher", "diving board", "dog", "dolphin", "donut", "door", 
+        "dragon", "dresser", "drill", "drums", "duck", "dumbbell", "ear", "elbow", "elephant", 
+        "envelope", "eraser", "eye", "eyeglasses", "face", "fan", "feather", "fence", "finger", 
+        "fire hydrant", "fireplace", "firetruck", "fish", "flamingo", "flashlight", "flip flops", 
+        "floor lamp", "flower", "flying saucer", "foot", "fork", "frog", "frying pan", 
+        "garden", "garden hose", "giraffe", "goatee", "golf club", "grapes", "grass", "guitar", 
+        "hamburger", "hammer", "hand", "harp", "hat", "headphones", "hedgehog", "helicopter", 
+        "helmet", "hexagon", "hockey puck", "hockey stick", "horse", "hospital", "hot air balloon", 
+        "hot dog", "hot tub", "hourglass", "house", "house plant", "hurricane", "ice cream", 
+        "jacket", "jail", "kangaroo", "key", "keyboard", "knee", "knife", "ladder", "lantern", 
+        "laptop", "leaf", "leg", "light bulb", "lighter", "lighthouse", "lightning", "line", 
+        "lion", "lipstick", "lobster", "lollipop", "mailbox", "map", "marker", "matches", 
+        "megaphone", "mermaid", "microphone", "microwave", "monkey", "moon", "mosquito", 
+        "motorbike", "mountain", "mouse", "moustache", "mouth", "mug", "mushroom", "nail", 
+        "necklace", "nose", "ocean", "octagon", "octopus", "onion", "oven", "owl", "paintbrush", 
+        "paint can", "palm tree", "panda", "pants", "paper clip", "parachute", "parrot", 
+        "passport", "peanut", "pear", "peas", "pencil", "penguin", "piano", "pickup truck", 
+        "picture frame", "pig", "pillow", "pineapple", "pizza", "pliers", "police car", "pond", 
+        "pool", "popsicle", "postcard", "potato", "power outlet", "purse", "rabbit", "raccoon", 
+        "radio", "rain", "rainbow", "rake", "remote control", "rhinoceros", "rifle", "river", 
+        "roller coaster", "rollerskates", "sailboat", "sandwich", "saw", "saxophone", "school bus", 
+        "scissors", "scorpion", "screwdriver", "sea turtle", "see saw", "shark", "sheep", 
+        "shoe", "shorts", "shovel", "sink", "skateboard", "skull", "skyscraper", "sleeping bag", 
+        "smiley face", "snail", "snake", "snorkel", "snowflake", "snowman", "soccer ball", 
+        "sock", "speedboat", "spider", "spoon", "spreadsheet", "square", "squiggle", "squirrel", 
+        "stairs", "star", "steak", "stereo", "stethoscope", "stitches", "stop sign", "stove", 
+        "strawberry", "streetlight", "string bean", "submarine", "suitcase", "sun", "swan", 
+        "sweater", "swing set", "sword", "syringe", "table", "teapot", "teddy-bear", "telephone", 
+        "television", "tennis racquet", "tent", "The Eiffel Tower", "The Great Wall of China", 
+        "The Mona Lisa", "tiger", "toaster", "toe", "toilet", "tooth", "toothbrush", "toothpaste", 
+        "tornado", "tractor", "traffic light", "train", "tree", "triangle", "trombone", "truck", 
+        "trumpet", "t-shirt", "umbrella", "underwear", "van", "vase", "violin", "washing machine", 
+        "watermelon", "waterslide", "whale", "wheel", "windmill", "wine bottle", "wine glass", 
+        "wristwatch", "yoga", "zebra", "zigzag"
+    ]
+    return all_categories
+
 def main():
     """Main function with user-friendly interface"""
     print("🎨 QuickDraw LoRA Dataset Preprocessor")
     print("=" * 50)
     
-    # Initialize preprocessor
-    preprocessor = QuickDrawLoRAPreprocessor()
+    print("\n🎯 Choose your dataset size:")
+    print("1. Small test (6 categories, ~300 images) - Quick test")
+    print("2. Medium (50 categories, ~2500 images) - Good balance") 
+    print("3. Large (100 categories, ~5000 images) - High quality")
+    print("4. ALL CATEGORIES (345 categories, ~17,250 images) - Maximum quality")
     
-    # Get popular categories
-    popular_categories = preprocessor.get_popular_categories()
+    choice = input("\nEnter your choice (1-4) [default: 2]: ").strip() or "2"
     
-    print(f"\n📋 Available categories ({len(popular_categories)} total):")
-    for i, cat in enumerate(popular_categories, 1):
-        print(f"  {i:2d}. {cat}")
+    # Initialize preprocessor with appropriate settings
+    if choice == "1":
+        preprocessor = QuickDrawLoRAPreprocessor(images_per_category=50)
+        popular_categories = preprocessor.get_popular_categories()
+        selected_categories = popular_categories[:6]
+        print(f"\n🚀 Processing {len(selected_categories)} categories (small test)")
+        
+    elif choice == "2":
+        preprocessor = QuickDrawLoRAPreprocessor(images_per_category=50)
+        popular_categories = preprocessor.get_popular_categories()
+        selected_categories = popular_categories[:50]
+        print(f"\n🚀 Processing {len(selected_categories)} categories (medium dataset)")
+        
+    elif choice == "3":
+        preprocessor = QuickDrawLoRAPreprocessor(images_per_category=50)
+        all_categories = get_all_quickdraw_categories()
+        selected_categories = all_categories[:100]
+        print(f"\n🚀 Processing {len(selected_categories)} categories (large dataset)")
+        
+    elif choice == "4":
+        print("\n📊 How many images per category?")
+        print("1. Conservative (50 images) - 17,250 total")
+        print("2. Balanced (100 images) - 34,500 total") 
+        print("3. High Quality (200 images) - 69,000 total")
+        print("4. Maximum (500 images) - 172,500 total")
+        
+        img_choice = input("Enter choice (1-4) [default: 2]: ").strip() or "2"
+        
+        if img_choice == "1":
+            images_per_cat = 50
+        elif img_choice == "2": 
+            images_per_cat = 100
+        elif img_choice == "3":
+            images_per_cat = 200
+        elif img_choice == "4":
+            images_per_cat = 500
+        else:
+            images_per_cat = 100
+            
+        preprocessor = QuickDrawLoRAPreprocessor(images_per_category=images_per_cat)
+        selected_categories = get_all_quickdraw_categories()
+        total_images = len(selected_categories) * images_per_cat
+        
+        print(f"\n🚀 Processing ALL {len(selected_categories)} categories!")
+        print(f"📊 Total images: {total_images:,}")
+        print(f"⏱️  Estimated processing time: {total_images // 1000} hours")
+        print(f"💾 Estimated dataset size: ~{total_images * 0.5 // 1000} GB")
+        
+        confirm = input("Continue? (y/N): ").strip().lower()
+        if confirm != 'y':
+            print("Cancelled.")
+            return
+    else:
+        print("Invalid choice, using medium dataset")
+        preprocessor = QuickDrawLoRAPreprocessor(images_per_category=50)
+        popular_categories = preprocessor.get_popular_categories()
+        selected_categories = popular_categories[:50]
     
-    print(f"\n🎯 Default selection: First 6 categories")
-    print("   (cat, dog, bird, fish, horse, cow)")
-    
-    # Use default selection for simplicity
-    selected_categories = popular_categories[:6]  # First 6 categories
-    
-    print(f"\n🚀 Processing {len(selected_categories)} categories:")
-    for cat in selected_categories:
-        print(f"   • {cat}")
+    print(f"\n📊 Total images: {len(selected_categories) * preprocessor.images_per_category}")
+    print(f"💾 Estimated size: {len(selected_categories) * 50 * 512 * 512 * 3 / 1e9:.1f} GB")
     
     # Start processing
     preprocessor.process_categories(selected_categories)
