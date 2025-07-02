@@ -25,6 +25,7 @@ SCROLL_SPEED = 50  # Increased for faster scrolling
 TEXT_PADDING = 30  # Reduced padding between elements
 SCROLL_ANIMATION_FRAMES = 15  # Number of frames for smooth scroll animation
 LOADING_DOT_COUNT = 3  # Number of dots in loading animation
+LOADING_EXTRA_PADDING = 24  # Extra vertical space above loading indicator if not first
 
 # Font will be determined at runtime
 FONT_PATH = None  
@@ -228,30 +229,22 @@ def create_drawing_animation(image, progress):
     return result
 
 def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
-    """Create an animated loading indicator with dots"""
-    # Create a new image for the loading indicator
-    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 40), (0, 0, 0, 0))
+    """Create an animated loading indicator with bouncing dots (ChatGPT/Claude style)"""
+    dot_radius = 14
+    dot_spacing = 40
+    bounce_height = 18
+    base_y = 20
+    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 60), (0, 0, 0, 0))
     draw = ImageDraw.Draw(loading_img)
-    
-    # Calculate dot positions and animation
-    dot_spacing = 20
     total_width = (dot_count - 1) * dot_spacing
     start_x = (VIDEO_WIDTH - total_width) // 2
-    
-    # Animate dots with a wave effect
     for i in range(dot_count):
-        # Calculate dot position
         x = start_x + (i * dot_spacing)
-        y = 20  # Center vertically
-        
-        # Calculate opacity based on animation
-        progress = (frame % total_frames) / total_frames
-        dot_progress = (progress + (i / dot_count)) % 1.0
-        opacity = int(255 * (0.3 + 0.7 * abs(math.sin(dot_progress * math.pi))))
-        
-        # Draw dot with dark color
-        draw.ellipse([x-4, y-4, x+4, y+4], fill=(*TEXT_COLOR, opacity))
-    
+        phase = (frame / 8.0) + (i * 0.33)
+        bounce = (math.sin(phase * math.pi * 2) + 1) / 2
+        y = base_y - int(bounce * bounce_height)
+        opacity = int(180 + 75 * bounce)
+        draw.ellipse([x-dot_radius, y-dot_radius, x+dot_radius, y+dot_radius], fill=(*TEXT_COLOR, opacity))
     return loading_img
 
 def create_text_element(text, font_size=140):
@@ -421,18 +414,14 @@ def generate_frames():
                         except Exception as e:
                             print(f"Error processing image: {e}")
         
-        # Calculate total height and handle scrolling
+        # Calculate total height for scrolling
         total_height = 0
-        for i, elem in enumerate(visible_elements):
-            if elem['type'] == 'image' and elem.get('drawing_progress', 1.0) < 1.0:
-                # For images being drawn, use the actual drawn height
-                drawn_height = int(elem['image'].height * elem['drawing_progress'])
-                # Add padding only to the drawn portion
-                total_height += drawn_height + (TEXT_PADDING if drawn_height > 0 and i < len(visible_elements) - 1 else 0)
-            else:
-                # For completed images and other elements, use full height
-                total_height += elem['image'].height + (TEXT_PADDING if i < len(visible_elements) - 1 else 0)
-        
+        for idx, elem in enumerate(visible_elements):
+            if idx > 0 and elem['type'] == 'loading':
+                total_height += LOADING_EXTRA_PADDING
+            total_height += elem['image'].height
+            if idx < len(visible_elements) - 1:
+                total_height += TEXT_PADDING
         target_scroll = max(0, total_height - VIDEO_HEIGHT)
         
         if current_round != last_round:
@@ -450,7 +439,9 @@ def generate_frames():
         
         # Position elements with smooth scrolling
         current_y = 0
-        for elem in visible_elements:
+        for idx, elem in enumerate(visible_elements):
+            if idx > 0 and elem['type'] == 'loading':
+                current_y += LOADING_EXTRA_PADDING
             elem['y_offset'] = current_y - current_scroll
             current_y += elem['image'].height + TEXT_PADDING
         
@@ -655,6 +646,8 @@ def main():
                         help='Background music file (optional)')
     parser.add_argument('--font', type=str, default=None,
                         help='Path to a font file to use (optional, will use system font if not specified)')
+    parser.add_argument('--max-rounds', type=int, default=None,
+                        help='Maximum number of rounds to process (for faster testing)')
     
     args = parser.parse_args()
     
@@ -692,6 +685,10 @@ def main():
         print("Failed to read game log data. Please check the game directory path.")
         return
     
+    # Limit number of rounds if requested
+    if args.max_rounds is not None:
+        all_rounds = all_rounds[:args.max_rounds]
+    global TOTAL_ROUNDS
     TOTAL_ROUNDS = len(all_rounds)
     print(f"Creating animation with {TOTAL_ROUNDS} rounds")
     
