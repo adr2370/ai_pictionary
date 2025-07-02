@@ -6,6 +6,7 @@ import math
 import sys
 import datetime
 import re
+import random
 
 # Create directories
 os.makedirs("temp_frames", exist_ok=True)
@@ -229,25 +230,37 @@ def create_drawing_animation(image, progress):
     result.paste(image, (0, 0), mask)
     return result
 
-def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
-    """Create an animated loading indicator with bouncing dots (ChatGPT/Claude style), with 20px white padding above."""
-    dot_radius = 14
-    dot_spacing = 40
-    bounce_height = 18
-    base_y = 20
-    # Increase height by 20px for padding
-    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 80), (255, 255, 255, 255))
+def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT, mode='analyzing'):
+    """Create a matrix/code style loading indicator with animated pattern and left-aligned text, so the prefix stays fixed. Mode can be 'analyzing' or 'generating'."""
+    chars = ['█', '▓', '▒', '░']
+    LOADING_HEIGHT = 160
+    FONT_SIZE = 80
+    LEFT_MARGIN = 60
+    PATTERN_LEN = 8
+    loading_img = Image.new('RGBA', (VIDEO_WIDTH, LOADING_HEIGHT), (255, 255, 255, 255))
     draw = ImageDraw.Draw(loading_img)
-    # The top 20px are already white due to the background
-    total_width = (dot_count - 1) * dot_spacing
-    start_x = (VIDEO_WIDTH - total_width) // 2
-    for i in range(dot_count):
-        x = start_x + (i * dot_spacing)
-        phase = (frame / 8.0) + (i * 0.33)
-        bounce = (math.sin(phase * math.pi * 2) + 1) / 2
-        y = base_y - int(bounce * bounce_height) + 20  # shift down by 20px for padding
-        opacity = int(180 + 75 * bounce)
-        draw.ellipse([x-dot_radius, y-dot_radius, x+dot_radius, y+dot_radius], fill=(*TEXT_COLOR, opacity))
+    random.seed(frame // 6)
+    pattern = ''.join(random.choices(chars, k=PATTERN_LEN))
+    if mode == 'generating':
+        text_prefix = "Generating: ["
+    else:
+        text_prefix = "Analyzing: ["
+    text_suffix = "]"
+    font_path = FONT_PATH if FONT_PATH else get_default_font()
+    try:
+        font = ImageFont.truetype(font_path, FONT_SIZE) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+    prefix_bbox = draw.textbbox((0, 0), text_prefix, font=font)
+    prefix_width = prefix_bbox[2] - prefix_bbox[0]
+    text_y = 20 + (LOADING_HEIGHT - 40 - (prefix_bbox[3] - prefix_bbox[1])) // 2
+    draw.text((LEFT_MARGIN, text_y), text_prefix, fill=TEXT_COLOR, font=font)
+    pattern_x = LEFT_MARGIN + prefix_width
+    draw.text((pattern_x, text_y), pattern, fill=TEXT_COLOR, font=font)
+    pattern_bbox = draw.textbbox((0, 0), pattern, font=font)
+    pattern_width = pattern_bbox[2] - pattern_bbox[0]
+    suffix_x = pattern_x + pattern_width
+    draw.text((suffix_x, text_y), text_suffix, fill=TEXT_COLOR, font=font)
     return loading_img
 
 def create_text_element(text, font_size=140):
@@ -279,7 +292,7 @@ def create_text_element(text, font_size=140):
     # Calculate total height
     bbox = draw.textbbox((0, 0), 'A', font=font)
     line_height = (bbox[3] - bbox[1]) + 10
-    EXTRA_BOTTOM_PADDING = 40  # Increased bottom padding for more space under words
+    EXTRA_BOTTOM_PADDING = 30  # Increased bottom padding for more space under words
     total_height = line_height * len(lines) + 40 + EXTRA_BOTTOM_PADDING
     text_img = Image.new('RGBA', (VIDEO_WIDTH, total_height), (0,0,0,0))
     draw = ImageDraw.Draw(text_img)
@@ -324,9 +337,9 @@ def generate_frames(part_number=None):
     intro_text = None
     intro_overlay_frames = 0
     frames_per_round = int(DURATION * FPS)
-    initial_loading = int(frames_per_round * 0.1)
-    text_phase = int(frames_per_round * 0.3)
-    image_delay = int(frames_per_round * 0.1)
+    initial_loading = int(frames_per_round * 0.18)  # Increased loading duration
+    text_phase = int(frames_per_round * 0.26)       # Slightly reduced text phase
+    image_delay = int(frames_per_round * 0.18)      # Increased image delay
     drawing_phase = int(frames_per_round * 0.4)
     transition_phase = int(frames_per_round * 0.1)
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
@@ -356,66 +369,186 @@ def generate_frames(part_number=None):
         for round_idx in range(current_round + 1):
             if round_idx < len(all_rounds):
                 round_data = all_rounds[round_idx]
-                
                 # For current round, handle text and image timing
                 if round_idx == current_round:
-                    # Show initial loading animation
-                    if frame_in_round < initial_loading:
-                        loading_img = create_loading_indicator(frame, FPS)
-                        visible_elements.append({
-                            'type': 'loading',
-                            'image': loading_img,
-                            'y_offset': 0,
-                            'opacity': 255
-                        })
-                    # Show text after initial loading
-                    elif frame_in_round >= initial_loading:
+                    if current_round == 0:
+                        # For the first round, show the word immediately, no loading indicator
                         text = f"{round_data['prompt']}"
                         text_img = create_text_element(text)
-                        # Fade in text
-                        text_opacity = min(255, int((frame_in_round - initial_loading) / (text_phase * 0.2) * 255))
-                        visible_elements.append({
-                            'type': 'text',
-                            'image': text_img,
-                            'y_offset': 0,
-                            'opacity': text_opacity
-                        })
-                    
-                    # Show loading indicator during image delay
-                    if frame_in_round >= text_phase and frame_in_round < text_phase + image_delay:
-                        loading_img = create_loading_indicator(frame, FPS)
-                        visible_elements.append({
-                            'type': 'loading',
-                            'image': loading_img,
-                            'y_offset': 0,
-                            'opacity': 255
-                        })
-                    
-                    # Show the image only after text delay
-                    if frame_in_round >= text_phase + image_delay:
-                        if 'image' in round_data and os.path.exists(round_data['image']):
-                            try:
-                                round_img = Image.open(round_data['image']).convert('RGBA')
-                                img_width, img_height = round_img.size
-                                
-                                ratio = VIDEO_WIDTH / img_width
-                                new_width = int(img_width * ratio)
-                                new_height = int(img_height * ratio)
-                                
-                                round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                                
-                                # Calculate drawing progress
-                                drawing_progress = min(1.0, (frame_in_round - (text_phase + image_delay)) / drawing_phase)
-                                animated_img = create_drawing_animation(round_img, drawing_progress)
-                                visible_elements.append({
-                                    'type': 'image',
-                                    'image': animated_img,
-                                    'y_offset': 0,
-                                    'opacity': 255,
-                                    'drawing_progress': drawing_progress
-                                })
-                            except Exception as e:
-                                print(f"Error processing image: {e}")
+                        # Only add the word once per frame
+                        word_added = False
+                        # Add a short delay before showing the 'Generating' loading indicator for the image
+                        GENERATE_DELAY_FRAMES = int(frames_per_round * 0.18)
+                        if frame_in_round < GENERATE_DELAY_FRAMES:
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            word_added = True
+                        if frame_in_round >= GENERATE_DELAY_FRAMES and frame_in_round < GENERATE_DELAY_FRAMES + image_delay:
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            loading_img = create_loading_indicator(frame, FPS, mode='generating')
+                            visible_elements.append({
+                                'type': 'loading',
+                                'image': loading_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            word_added = True
+                        if frame_in_round >= GENERATE_DELAY_FRAMES + image_delay and frame_in_round < GENERATE_DELAY_FRAMES + image_delay + drawing_phase:
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            if 'image' in round_data and os.path.exists(round_data['image']):
+                                try:
+                                    round_img = Image.open(round_data['image']).convert('RGBA')
+                                    img_width, img_height = round_img.size
+                                    ratio = VIDEO_WIDTH / img_width
+                                    new_width = int(img_width * ratio)
+                                    new_height = int(img_height * ratio)
+                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    drawing_progress = min(1.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay)) / drawing_phase)
+                                    animated_img = create_drawing_animation(round_img, drawing_progress)
+                                    visible_elements.append({
+                                        'type': 'image',
+                                        'image': animated_img,
+                                        'y_offset': 0,
+                                        'opacity': 255,
+                                        'drawing_progress': drawing_progress
+                                    })
+                                except Exception as e:
+                                    print(f"Error processing image: {e}")
+                            word_added = True
+                        if frame_in_round >= GENERATE_DELAY_FRAMES + image_delay + drawing_phase:
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            if 'image' in round_data and os.path.exists(round_data['image']):
+                                try:
+                                    round_img = Image.open(round_data['image']).convert('RGBA')
+                                    img_width, img_height = round_img.size
+                                    ratio = VIDEO_WIDTH / img_width
+                                    new_width = int(img_width * ratio)
+                                    new_height = int(img_height * ratio)
+                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    visible_elements.append({
+                                        'type': 'image',
+                                        'image': round_img,
+                                        'y_offset': 0,
+                                        'opacity': 255
+                                    })
+                                except Exception as e:
+                                    print(f"Error processing image: {e}")
+                            word_added = True
+                    else:
+                        # Show initial loading animation for the word
+                        if frame_in_round < initial_loading:
+                            loading_img = create_loading_indicator(frame, FPS, mode='analyzing')
+                            visible_elements.append({
+                                'type': 'loading',
+                                'image': loading_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                        # Show text after initial_loading
+                        elif frame_in_round >= initial_loading and frame_in_round < initial_loading + text_phase:
+                            text = f"{round_data['prompt']}"
+                            text_img = create_text_element(text)
+                            text_opacity = min(255, int((frame_in_round - initial_loading) / (text_phase * 0.2) * 255))
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': text_opacity
+                            })
+                        # Show loading indicator for the image (short, only during image_delay), but keep the word visible above
+                        if frame_in_round >= initial_loading + text_phase and frame_in_round < initial_loading + text_phase + image_delay:
+                            # Ensure the word is visible above the loading indicator
+                            text = f"{round_data['prompt']}"
+                            text_img = create_text_element(text)
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            loading_img = create_loading_indicator(frame, FPS, mode='generating')
+                            visible_elements.append({
+                                'type': 'loading',
+                                'image': loading_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                        # Show image drawing animation during drawing_phase
+                        if frame_in_round >= initial_loading + text_phase + image_delay and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase:
+                            # Ensure the word is visible above the image
+                            text = f"{round_data['prompt']}"
+                            text_img = create_text_element(text)
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            if 'image' in round_data and os.path.exists(round_data['image']):
+                                try:
+                                    round_img = Image.open(round_data['image']).convert('RGBA')
+                                    img_width, img_height = round_img.size
+                                    ratio = VIDEO_WIDTH / img_width
+                                    new_width = int(img_width * ratio)
+                                    new_height = int(img_height * ratio)
+                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    drawing_progress = min(1.0, (frame_in_round - (initial_loading + text_phase + image_delay)) / drawing_phase)
+                                    animated_img = create_drawing_animation(round_img, drawing_progress)
+                                    visible_elements.append({
+                                        'type': 'image',
+                                        'image': animated_img,
+                                        'y_offset': 0,
+                                        'opacity': 255,
+                                        'drawing_progress': drawing_progress
+                                    })
+                                except Exception as e:
+                                    print(f"Error processing image: {e}")
+                        # Show fully revealed image after drawing phase
+                        if frame_in_round >= initial_loading + text_phase + image_delay + drawing_phase:
+                            # Ensure the word is visible above the image
+                            text = f"{round_data['prompt']}"
+                            text_img = create_text_element(text)
+                            visible_elements.append({
+                                'type': 'text',
+                                'image': text_img,
+                                'y_offset': 0,
+                                'opacity': 255
+                            })
+                            if 'image' in round_data and os.path.exists(round_data['image']):
+                                try:
+                                    round_img = Image.open(round_data['image']).convert('RGBA')
+                                    img_width, img_height = round_img.size
+                                    ratio = VIDEO_WIDTH / img_width
+                                    new_width = int(img_width * ratio)
+                                    new_height = int(img_height * ratio)
+                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    visible_elements.append({
+                                        'type': 'image',
+                                        'image': round_img,
+                                        'y_offset': 0,
+                                        'opacity': 255
+                                    })
+                                except Exception as e:
+                                    print(f"Error processing image: {e}")
                 else:
                     # For previous rounds, show both text and image
                     text = f"{round_data['prompt']}"
