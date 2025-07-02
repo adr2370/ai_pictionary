@@ -279,7 +279,8 @@ def create_text_element(text, font_size=140):
     # Calculate total height
     bbox = draw.textbbox((0, 0), 'A', font=font)
     line_height = (bbox[3] - bbox[1]) + 10
-    total_height = line_height * len(lines) + 40
+    EXTRA_BOTTOM_PADDING = 40  # Increased bottom padding for more space under words
+    total_height = line_height * len(lines) + 40 + EXTRA_BOTTOM_PADDING
     text_img = Image.new('RGBA', (VIDEO_WIDTH, total_height), (0,0,0,0))
     draw = ImageDraw.Draw(text_img)
     y = 20
