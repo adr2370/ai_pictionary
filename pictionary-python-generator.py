@@ -56,20 +56,17 @@ TOTAL_ROUNDS = 0
 DURATION = DEFAULT_DURATION
 FPS = DEFAULT_FPS
 
-def get_default_font():
-    """Find a default system font that's available"""
+def get_default_font(bold=False):
+    """Find a default system font that's available. If bold=True, prefer bold fonts."""
     # Try common fonts available on different systems
-    potential_fonts = [
-        "Arial.ttf",
-        "DejaVuSans.ttf",
-        "FreeSans.ttf",
-        "LiberationSans-Regular.ttf",
-        "Helvetica.ttf",
-        "Verdana.ttf",
-        "Tahoma.ttf",
-        "Segoe UI.ttf"
-    ]
-    
+    if bold:
+        potential_fonts = [
+            "Arialbd.ttf", "arialbd.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf", "Verdana Bold.ttf", "Tahoma Bold.ttf", "SegoeUIBold.ttf", "segoeuib.ttf", "Calibri Bold.ttf", "calibrib.ttf"
+        ]
+    else:
+        potential_fonts = [
+            "Arial.ttf", "DejaVuSans.ttf", "FreeSans.ttf", "LiberationSans-Regular.ttf", "Helvetica.ttf", "Verdana.ttf", "Tahoma.ttf", "Segoe UI.ttf"
+        ]
     # Look in common font directories by platform
     if sys.platform.startswith('win'):
         font_dirs = [
@@ -87,7 +84,6 @@ def get_default_font():
             '/usr/local/share/fonts',
             os.path.expanduser('~/.fonts')
         ]
-    
     # Try to find a system font
     for font_dir in font_dirs:
         if os.path.exists(font_dir):
@@ -95,14 +91,12 @@ def get_default_font():
                 font_path = os.path.join(font_dir, font_name)
                 if os.path.exists(font_path):
                     try:
-                        # Test if we can actually load the font
                         test_font = ImageFont.truetype(font_path, 20)
                         print(f"Using system font: {font_path}")
                         return font_path
                     except Exception as e:
                         print(f"Could not load font {font_path}: {e}")
                         continue
-    
     print("Warning: No system font found. Using PIL's default font.")
     return None
 
@@ -140,37 +134,44 @@ def update_image_paths(image_dir):
     
     return True
 
-def create_title_text(draw, font, y_offset=0):
-    """Draw the title at the top of the frame"""
-    # Use provided font or load default if None
-    if font is None:
-        if FONT_PATH:
-            try:
-                title_font = ImageFont.truetype(FONT_PATH, 80)
-            except:
-                # If truetype fails, use default
-                title_font = ImageFont.load_default()
-        else:
-            title_font = ImageFont.load_default()
-    else:
-        title_font = font
-        
-    title_text = "Pictionary Chain Game"
-    
-    # Get text size - handle different PIL versions
+def create_title_text(draw, font, part_number=None, extra_bold=False, bottom_padding=120):
+    """Draw the title at the bottom: 'The World's Longest Game of Pictionary' (wrapped), extra bold, black, large, with optional part number as last line."""
+    base_title = "The World's Longest Game of Pictionary"
+    if part_number is not None:
+        base_title += f" Part {part_number}"
+    title_font_path = FONT_PATH if FONT_PATH else get_default_font(bold=True)
     try:
-        title_width, title_height = draw.textsize(title_text, font=title_font)
-    except AttributeError:
-        # For newer PIL versions
-        try:
-            title_width, title_height = draw.textbbox((0, 0), title_text, font=title_font)[2:]
-        except:
-            # Fallback to an approximate size
-            title_width, title_height = len(title_text) * 40, 80
-    
-    draw.text(((VIDEO_WIDTH - title_width) // 2, 50 + y_offset), 
-              title_text, fill=TEXT_COLOR, font=title_font)
-    return title_height + 50
+        title_font = ImageFont.truetype(title_font_path, 120) if title_font_path else ImageFont.load_default()
+    except Exception:
+        title_font = ImageFont.load_default()
+    max_width = VIDEO_WIDTH - 80
+    words = base_title.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        test_line = current_line + (" " if current_line else "") + word
+        bbox = draw.textbbox((0, 0), test_line, font=title_font)
+        w = bbox[2] - bbox[0]
+        if w > max_width and current_line:
+            lines.append(current_line)
+            current_line = word
+        else:
+            current_line = test_line
+    if current_line:
+        lines.append(current_line)
+    bbox = draw.textbbox((0, 0), 'A', font=title_font)
+    line_height = (bbox[3] - bbox[1]) + 24  # Increased line spacing
+    total_height = line_height * len(lines)
+    y = VIDEO_HEIGHT - total_height - bottom_padding
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=title_font)
+        w = bbox[2] - bbox[0]
+        # Simulate extra bold by drawing text multiple times with slight offsets
+        for dx in [-2, -1, 0, 1, 2]:
+            for dy in [-2, -1, 0, 1, 2]:
+                draw.text(((VIDEO_WIDTH - w) // 2 + dx, y + dy), line, fill=(0,0,0), font=title_font)
+        y += line_height
+    return VIDEO_HEIGHT - bottom_padding
 
 def draw_card(image, round_data, y_position, opacity=255):
     """Draw a single round card at the specified y position with given opacity"""
@@ -250,43 +251,43 @@ def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
     return loading_img
 
 def create_text_element(text, font_size=140):
-    """Create a text element with proper sizing"""
-    # Create a new image with transparent background
-    text_img = Image.new('RGBA', (VIDEO_WIDTH, 220), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(text_img)
-    
-    # Load font
-    font = None
-    if FONT_PATH:
-        try:
-            font = ImageFont.truetype(FONT_PATH, font_size)
-        except Exception as e:
-            print(f"Error loading specified font: {e}")
-    
-    if not font:
-        try:
-            # Try to load a system font
-            system_font = get_default_font()
-            if system_font:
-                font = ImageFont.truetype(system_font, font_size)
-            else:
-                # If all else fails, use PIL's default font
-                font = ImageFont.load_default()
-                print("Using PIL's default font - text may appear small")
-        except Exception as e:
-            print(f"Error loading system font: {e}")
-            font = ImageFont.load_default()
-    
-    # Calculate text size
+    """Create a text element with proper sizing and wrapping, using bold black font."""
+    # Use bold font
+    font_path = FONT_PATH if FONT_PATH else get_default_font(bold=True)
     try:
-        text_width = draw.textlength(text, font=font)
-    except:
-        text_width = len(text) * font_size * 0.6
-    
-    # Draw the text with dark color
-    draw.text(((VIDEO_WIDTH - text_width) // 2, 30),  # Adjusted y offset
-              text, fill=(*TEXT_COLOR, 255), font=font)
-    
+        font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+    # Wrap text
+    max_width = VIDEO_WIDTH - 80
+    words = text.split()
+    lines = []
+    current_line = ""
+    dummy_img = Image.new('RGBA', (VIDEO_WIDTH, 10), (0,0,0,0))
+    draw = ImageDraw.Draw(dummy_img)
+    for word in words:
+        test_line = current_line + (" " if current_line else "") + word
+        bbox = draw.textbbox((0, 0), test_line, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if w > max_width and current_line:
+            lines.append(current_line)
+            current_line = word
+        else:
+            current_line = test_line
+    if current_line:
+        lines.append(current_line)
+    # Calculate total height
+    bbox = draw.textbbox((0, 0), 'A', font=font)
+    line_height = (bbox[3] - bbox[1]) + 10
+    total_height = line_height * len(lines) + 40
+    text_img = Image.new('RGBA', (VIDEO_WIDTH, total_height), (0,0,0,0))
+    draw = ImageDraw.Draw(text_img)
+    y = 20
+    for line in lines:
+        bbox = draw.textbbox((0, 0), line, font=font)
+        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text(((VIDEO_WIDTH - w) // 2, y), line, fill=(0,0,0,255), font=font)
+        y += line_height
     return text_img
 
 def get_intro_overlay(intro_text, frame_idx, num_frames=45):
@@ -317,33 +318,30 @@ def get_intro_overlay(intro_text, frame_idx, num_frames=45):
     dummy_img.paste(text_img, ((VIDEO_WIDTH - w) // 2, (VIDEO_HEIGHT - h) // 2), text_img)
     return dummy_img
 
-def generate_frames():
-    """Generate all frames for the animation"""
-    intro_text = "The World's Longest Game of Pictionary!"
-    intro_overlay_frames = 45  # 1.5 seconds at 30 FPS
-
-    # Calculate timing for each phase
+def generate_frames(part_number=None):
+    """Generate all frames for the animation, passing part_number to title."""
+    intro_text = None
+    intro_overlay_frames = 0
     frames_per_round = int(DURATION * FPS)
-    initial_loading = int(frames_per_round * 0.1)    # 10% for initial loading
-    text_phase = int(frames_per_round * 0.3)        # 30% for text display
-    image_delay = int(frames_per_round * 0.1)       # 10% delay before image
-    drawing_phase = int(frames_per_round * 0.4)     # 40% of time for drawing
-    transition_phase = int(frames_per_round * 0.1)  # 10% for transition
-    
+    initial_loading = int(frames_per_round * 0.1)
+    text_phase = int(frames_per_round * 0.3)
+    image_delay = int(frames_per_round * 0.1)
+    drawing_phase = int(frames_per_round * 0.4)
+    transition_phase = int(frames_per_round * 0.1)
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
-    
     print(f"Creating {TOTAL_FRAMES} frames for {TOTAL_ROUNDS} rounds...")
-    
-    # Track the scroll position
     current_scroll = 0
     target_scroll = 0
     last_round = -1
     scroll_start = 0
     scroll_frames = 0
-    
+    title_duration_frames = int(3 * FPS)
     for frame in range(TOTAL_FRAMES):
-        # Create base image with background
         image = Image.new('RGB', (VIDEO_WIDTH, VIDEO_HEIGHT), BACKGROUND_COLOR)
+        draw = ImageDraw.Draw(image)
+        # Only show the title for the first 3 seconds
+        if frame < title_duration_frames:
+            create_title_text(draw, None, part_number=part_number, extra_bold=True, bottom_padding=120)
         
         # Calculate which round we're on and the progress within that round
         current_round = frame // frames_per_round
@@ -688,6 +686,8 @@ def main():
                         help='Path to a font file to use (optional, will use system font if not specified)')
     parser.add_argument('--max-rounds', type=int, default=None,
                         help='Maximum number of rounds to process (for faster testing)')
+    parser.add_argument('--part', type=int, default=None,
+                        help='Part number to display in the title (e.g., 1 for Part 1)')
     
     args = parser.parse_args()
     
@@ -733,7 +733,7 @@ def main():
     print(f"Creating animation with {TOTAL_ROUNDS} rounds")
     
     # Run the generation process
-    generate_frames()
+    generate_frames(part_number=args.part)
     create_video(output_path, args.music)
     cleanup()
     
