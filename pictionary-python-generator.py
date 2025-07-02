@@ -37,6 +37,9 @@ CARD_HEIGHT = 800
 CARD_PADDING = 40
 TITLE_HEIGHT = 150
 
+# Bottom padding for all content
+BOTTOM_PADDING = 90
+
 # Default data from your HTML (will be updated with proper image paths)
 rounds_data = [
     {"number": 1, "prompt": "submarine", "image": "round_1_submarine.png", "guess": "Spaceship"},
@@ -587,6 +590,8 @@ def generate_frames(part_number=None):
             total_height += elem['image'].height
             if idx < len(visible_elements) - 1:
                 total_height += TEXT_PADDING
+        # Add bottom padding so last element never touches the bottom
+        total_height += BOTTOM_PADDING
         target_scroll = max(0, total_height - VIDEO_HEIGHT)
         
         if current_round != last_round:
