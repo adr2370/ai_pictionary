@@ -7,6 +7,7 @@ import sys
 import datetime
 import re
 import random
+from collections import deque
 
 # Create directories
 os.makedirs("temp_frames", exist_ok=True)
@@ -215,22 +216,75 @@ def draw_card(image, round_data, y_position, opacity=255):
             draw.text((VIDEO_WIDTH//2 - 100, VIDEO_HEIGHT//2), f"Image loading error: {round_data['image']}", 
                       fill=(255, 0, 0, opacity), font=ImageFont.load_default())
 
-def create_drawing_animation(image, progress):
-    """Create a drawing animation effect by gradually revealing the image"""
-    # Create a mask for the drawing effect
-    mask = Image.new('L', image.size, 0)
-    draw = ImageDraw.Draw(mask)
-    
-    # Calculate the number of lines to draw based on progress
-    num_lines = int(image.height * progress)
-    
-    # Draw horizontal lines to create a drawing effect
-    for y in range(num_lines):
-        draw.line([(0, y), (image.width, y)], fill=255)
-    
-    # Apply the mask to the image
+def extract_black_strokes(image, threshold=80):
+    """Return a list of strokes, each stroke is a list of (x, y) pixels."""
+    gray = image.convert('L')
+    pixels = gray.load()
+    width, height = image.size
+    visited = [[False] * height for _ in range(width)]
+    strokes = []
+
+    for y in range(height):
+        for x in range(width):
+            if not visited[x][y] and pixels[x, y] < threshold:
+                # Start a new stroke
+                stroke = []
+                queue = deque()
+                queue.append((x, y))
+                visited[x][y] = True
+                while queue:
+                    cx, cy = queue.popleft()
+                    stroke.append((cx, cy))
+                    # Check 8 neighbors
+                    for dx in [-1, 0, 1]:
+                        for dy in [-1, 0, 1]:
+                            if dx == 0 and dy == 0:
+                                continue
+                            nx, ny = cx + dx, cy + dy
+                            if (0 <= nx < width and 0 <= ny < height and
+                                not visited[nx][ny] and pixels[nx, ny] < threshold):
+                                visited[nx][ny] = True
+                                queue.append((nx, ny))
+                strokes.append(stroke)
+    return strokes
+
+def create_drawing_animation(image, progress, strokes_cache={}):
+    """
+    Animate black strokes being drawn from one end to the other, with all strokes finishing by the end of the drawing phase.
+    """
+    cache_key = (id(image), image.size)
+    if cache_key not in strokes_cache:
+        strokes = extract_black_strokes(image)
+        random.seed(42)
+        random.shuffle(strokes)
+        total_strokes = len(strokes)
+        stroke_duration = 0.2  # Each stroke takes 20% of the drawing phase to draw
+        stroke_timings = []
+        if total_strokes > 1:
+            for i, stroke in enumerate(strokes):
+                start = i * (1 - stroke_duration) / (total_strokes - 1)
+                end = start + stroke_duration
+                if random.random() < 0.5:
+                    stroke = list(reversed(stroke))
+                stroke_timings.append((stroke, start, end))
+        else:
+            # Only one stroke
+            stroke_timings.append((strokes[0], 0.0, 1.0))
+        strokes_cache[cache_key] = stroke_timings
+    else:
+        stroke_timings = strokes_cache[cache_key]
+
     result = Image.new('RGBA', image.size, (0, 0, 0, 0))
-    result.paste(image, (0, 0), mask)
+    for stroke, start, end in stroke_timings:
+        if progress >= end:
+            for x, y in stroke:
+                result.putpixel((x, y), (0, 0, 0, 255))
+        elif progress > start:
+            local_progress = (progress - start) / (end - start)
+            reveal_count = int(len(stroke) * local_progress)
+            for x, y in stroke[:reveal_count]:
+                result.putpixel((x, y), (0, 0, 0, 255))
+        # else: not started yet
     return result
 
 def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT, mode='analyzing'):
@@ -420,7 +474,7 @@ def generate_frames(part_number=None):
                                     new_width = int(img_width * ratio)
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                                    drawing_progress = min(1.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay)) / drawing_phase)
+                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay)) / drawing_phase))
                                     animated_img = create_drawing_animation(round_img, drawing_progress)
                                     visible_elements.append({
                                         'type': 'image',
@@ -514,7 +568,7 @@ def generate_frames(part_number=None):
                                     new_width = int(img_width * ratio)
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                                    drawing_progress = min(1.0, (frame_in_round - (initial_loading + text_phase + image_delay)) / drawing_phase)
+                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (initial_loading + text_phase + image_delay)) / drawing_phase))
                                     animated_img = create_drawing_animation(round_img, drawing_progress)
                                     visible_elements.append({
                                         'type': 'image',
