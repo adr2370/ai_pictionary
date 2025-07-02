@@ -5,3 +5,4 @@ videos/
 LoRA/quickdraw_lora_training/
 LoRA/output/
 LoRA/logs/
+temp_frames/

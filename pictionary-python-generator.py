@@ -289,8 +289,39 @@ def create_text_element(text, font_size=140):
     
     return text_img
 
+def get_intro_overlay(intro_text, frame_idx, num_frames=45):
+    """Return an RGBA overlay image with the intro text for the given frame index (for fade in/out)."""
+    font_size = 90
+    if FONT_PATH:
+        try:
+            font = ImageFont.truetype(FONT_PATH, font_size)
+        except Exception:
+            font = ImageFont.load_default()
+    else:
+        font = ImageFont.load_default()
+    # Animate opacity (fade in and out)
+    if frame_idx < num_frames // 3:
+        opacity = int(255 * (frame_idx / (num_frames // 3)))
+    elif frame_idx > 2 * num_frames // 3:
+        opacity = int(255 * ((num_frames - frame_idx) / (num_frames // 3)))
+    else:
+        opacity = 255
+    # Draw text centered
+    dummy_img = Image.new('RGBA', (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(dummy_img)
+    bbox = draw.textbbox((0, 0), intro_text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    text_img = Image.new('RGBA', (w, h), (255, 255, 255, 0))
+    text_draw = ImageDraw.Draw(text_img)
+    text_draw.text((0, 0), intro_text, font=font, fill=(*HIGHLIGHT_COLOR, opacity))
+    dummy_img.paste(text_img, ((VIDEO_WIDTH - w) // 2, (VIDEO_HEIGHT - h) // 2), text_img)
+    return dummy_img
+
 def generate_frames():
     """Generate all frames for the animation"""
+    intro_text = "The World's Longest Game of Pictionary!"
+    intro_overlay_frames = 45  # 1.5 seconds at 30 FPS
+
     # Calculate timing for each phase
     frames_per_round = int(DURATION * FPS)
     initial_loading = int(frames_per_round * 0.1)    # 10% for initial loading
@@ -468,6 +499,13 @@ def generate_frames():
                         elem['image'] = Image.merge('RGBA', (r, g, b, alpha))
                     image.paste(elem['image'], (0, int(y_pos)), elem['image'])
         
+        # Overlay intro text on the first N frames
+        if frame < intro_overlay_frames:
+            intro_overlay = get_intro_overlay(intro_text, frame, intro_overlay_frames)
+            image = image.convert('RGBA')
+            image.alpha_composite(intro_overlay)
+            image = image.convert('RGB')  # Convert back for saving as PNG
+
         # Save the frame
         frame_path = f"temp_frames/frame_{frame:05d}.png"
         image.save(frame_path)
