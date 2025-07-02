@@ -1,8 +1,8 @@
 {
   "2": {
     "inputs": {
-      "text": "A single, extremely simple Pictionary-style drawing. Imagine a quick sketch made with a pen in 10 seconds. Keep it minimalist - just the essential lines needed to recognize the concept.",
-      "clip": ["8", 1]
+      "text": "black and white sketch of a dog",
+      "clip": ["10", 1]
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
@@ -22,13 +22,13 @@
   },
   "4": {
     "inputs": {
-      "seed": 236361383523423,
+      "seed": 753980058821875,
       "steps": 20,
       "cfg": 7,
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
       "denoise": 1,
-      "model": ["8", 0],
+      "model": ["10", 0],
       "positive": ["2", 0],
       "negative": ["9", 0],
       "latent_image": ["3", 0]
@@ -69,12 +69,25 @@
   },
   "9": {
     "inputs": {
-      "text": "color, black background, sketchy lines, texture, artistic, realistic, shading, detailed, pencil, brush strokes, irregular lines",
-      "clip": ["8", 1]
+      "text": "",
+      "clip": ["10", 1]
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
       "title": "Negative Prompt"
+    }
+  },
+  "10": {
+    "inputs": {
+      "lora_name": "quickdraw_sketch.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": ["8", 0],
+      "clip": ["8", 1]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
     }
   }
 }
