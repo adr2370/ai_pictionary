@@ -33,7 +33,7 @@ class QuickDrawLoRAPreprocessor:
         # Create directory structure
         self.raw_data_dir = os.path.join(base_output_dir, "01_raw_ndjson")
         self.processed_dir = os.path.join(base_output_dir, "02_processed_images")
-        self.training_dir = os.path.join(base_output_dir, "03_training_data", "quickdraw_sketches", "25_sketch drawings")
+        self.training_dir = os.path.join(base_output_dir, "03_training_data", "quickdraw_sketches", "1_sketch_drawings")
         
         for directory in [self.raw_data_dir, self.processed_dir, self.training_dir]:
             os.makedirs(directory, exist_ok=True)
