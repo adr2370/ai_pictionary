@@ -229,20 +229,22 @@ def create_drawing_animation(image, progress):
     return result
 
 def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT):
-    """Create an animated loading indicator with bouncing dots (ChatGPT/Claude style)"""
+    """Create an animated loading indicator with bouncing dots (ChatGPT/Claude style), with 20px white padding above."""
     dot_radius = 14
     dot_spacing = 40
     bounce_height = 18
     base_y = 20
-    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 60), (0, 0, 0, 0))
+    # Increase height by 20px for padding
+    loading_img = Image.new('RGBA', (VIDEO_WIDTH, 80), (255, 255, 255, 255))
     draw = ImageDraw.Draw(loading_img)
+    # The top 20px are already white due to the background
     total_width = (dot_count - 1) * dot_spacing
     start_x = (VIDEO_WIDTH - total_width) // 2
     for i in range(dot_count):
         x = start_x + (i * dot_spacing)
         phase = (frame / 8.0) + (i * 0.33)
         bounce = (math.sin(phase * math.pi * 2) + 1) / 2
-        y = base_y - int(bounce * bounce_height)
+        y = base_y - int(bounce * bounce_height) + 20  # shift down by 20px for padding
         opacity = int(180 + 75 * bounce)
         draw.ellipse([x-dot_radius, y-dot_radius, x+dot_radius, y+dot_radius], fill=(*TEXT_COLOR, opacity))
     return loading_img
