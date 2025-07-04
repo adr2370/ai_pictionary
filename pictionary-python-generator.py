@@ -1,8 +1,7 @@
 import os
 import subprocess
 import argparse
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import math
+from PIL import Image, ImageDraw, ImageFont
 import sys
 import datetime
 import re
@@ -13,49 +12,23 @@ import shutil
 
 # Create directories
 os.makedirs("temp_frames", exist_ok=True)
-os.makedirs("temp_assets", exist_ok=True)
 
 # Constants
 VIDEO_WIDTH = 1080  # TikTok vertical video width
 VIDEO_HEIGHT = 1920  # TikTok vertical video height
 BACKGROUND_COLOR = (255, 255, 255)  # White
 TEXT_COLOR = (33, 33, 33)  # Dark gray, almost black
-HIGHLIGHT_COLOR = (0, 120, 212)  # Blue
-GUESS_COLOR = (220, 53, 69)  # Red
 DEFAULT_DURATION = 3  # Default duration for each card (seconds)
 DEFAULT_FPS = 30  # Default frames per second
-FADE_FRAMES = 15  # Number of frames for fade effects
-SCROLL_SPEED = 50  # Increased for faster scrolling
 TEXT_PADDING = 30  # Reduced padding between elements
 SCROLL_ANIMATION_FRAMES = 15  # Number of frames for smooth scroll animation
-LOADING_DOT_COUNT = 3  # Number of dots in loading animation
 LOADING_EXTRA_PADDING = 24  # Extra vertical space above loading indicator if not first
 
 # Font will be determined at runtime
 FONT_PATH = None  
 
-# Card dimensions
-CARD_WIDTH = VIDEO_WIDTH - 160
-CARD_HEIGHT = 800
-CARD_PADDING = 40
-TITLE_HEIGHT = 150
-
 # Bottom padding for all content
 BOTTOM_PADDING = 90
-
-# Default data from your HTML (will be updated with proper image paths)
-rounds_data = [
-    {"number": 1, "prompt": "submarine", "image": "round_1_submarine.png", "guess": "Spaceship"},
-    {"number": 2, "prompt": "Spaceship", "image": "round_2_spaceship.png", "guess": "Jet plane"},
-    {"number": 3, "prompt": "Jet plane", "image": "round_3_jet_plane.png", "guess": "Helicopter"},
-    {"number": 4, "prompt": "Helicopter", "image": "round_4_helicopter.png", "guess": "Airplane"},
-    {"number": 5, "prompt": "Airplane", "image": "round_5_airplane.png", "guess": "Bird"},
-    {"number": 6, "prompt": "Bird", "image": "round_6_bird.png", "guess": "Penguin"},
-    {"number": 7, "prompt": "Penguin", "image": "round_7_penguin.png", "guess": "Owl"},
-    {"number": 8, "prompt": "Owl", "image": "round_8_owl.png", "guess": "Penguin"},
-    {"number": 9, "prompt": "Penguin", "image": "round_9_penguin.png", "guess": "Crow"},
-    {"number": 10, "prompt": "Crow", "image": "round_10_crow.png", "guess": "Raven"},
-]
 
 # These will be initialized in main() based on command line arguments
 all_rounds = []
@@ -107,41 +80,7 @@ def get_default_font(bold=False):
     print("Warning: No system font found. Using PIL's default font.")
     return None
 
-def update_image_paths(image_dir):
-    """Update image paths in rounds_data to use the specified directory"""
-    global rounds_data
-    
-    # Verify directory exists
-    if not os.path.isdir(image_dir):
-        print(f"Error: Directory '{image_dir}' not found!")
-        return False
-    
-    print(f"Looking for images in: {image_dir}")
-    
-    # Get all files in the directory
-    all_files = os.listdir(image_dir)
-    
-    # Check for each round and find matching images
-    for round_data in rounds_data:
-        round_num = round_data["number"]
-        pattern = f"round_{round_num}_"
-        
-        # Find all files that start with the pattern
-        matching_files = [f for f in all_files if f.lower().startswith(pattern.lower())]
-        
-        if matching_files:
-            # Use the first matching file
-            image_name = matching_files[0]
-            full_path = os.path.join(image_dir, image_name)
-            round_data["image"] = full_path
-            print(f"Found image for round {round_num}: {image_name}")
-        else:
-            print(f"Warning: No image found for round {round_num} (pattern: {pattern}*)")
-            # Keep the original filename as a fallback, but it likely won't be found
-    
-    return True
-
-def create_title_text(draw, font, part_number=None, extra_bold=False, bottom_padding=120):
+def create_title_text(draw, font, part_number=None, bottom_padding=120):
     """Draw the title at the bottom: 'The World's Longest Game of Pictionary' (wrapped), extra bold, black, large, with optional part number as last line."""
     base_title = "The World's Longest Game of Pictionary"
     if part_number is not None:
@@ -179,44 +118,6 @@ def create_title_text(draw, font, part_number=None, extra_bold=False, bottom_pad
                 draw.text(((VIDEO_WIDTH - w) // 2 + dx, y + dy), line, fill=(0,0,0), font=title_font)
         y += line_height
     return VIDEO_HEIGHT - bottom_padding
-
-def draw_card(image, round_data, y_position, opacity=255):
-    """Draw a single round card at the specified y position with given opacity"""
-    draw = ImageDraw.Draw(image, 'RGBA')
-    
-    # If we have the image path, try to composite it
-    if 'image' in round_data and os.path.exists(round_data['image']):
-        try:
-            # Open the round image and resize to fit
-            round_img = Image.open(round_data['image']).convert('RGBA')
-            img_width, img_height = round_img.size
-            
-            # Calculate dimensions to fit the screen while maintaining aspect ratio
-            ratio = min(VIDEO_WIDTH / img_width, VIDEO_HEIGHT / img_height)
-            new_width = int(img_width * ratio)
-            new_height = int(img_height * ratio)
-            
-            # Resize image
-            round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Adjust opacity if needed
-            if opacity < 255:
-                alpha = round_img.split()[3]
-                alpha = alpha.point(lambda p: p * opacity // 255)
-                r, g, b = round_img.split()[:3]
-                round_img = Image.merge('RGBA', (r, g, b, alpha))
-            
-            # Calculate position to center the image
-            img_x = int((VIDEO_WIDTH - new_width) // 2)
-            img_y = int((VIDEO_HEIGHT - new_height) // 2)
-            
-            # Paste the image onto the frame
-            image.paste(round_img, (img_x, img_y), round_img)
-        except Exception as e:
-            print(f"Error placing image: {e}")
-            # Draw error text in the center
-            draw.text((VIDEO_WIDTH//2 - 100, VIDEO_HEIGHT//2), f"Image loading error: {round_data['image']}", 
-                      fill=(255, 0, 0, opacity), font=ImageFont.load_default())
 
 def extract_black_strokes(image, threshold=80):
     """Return a list of strokes, each stroke is a list of (x, y) pixels."""
@@ -260,7 +161,6 @@ def create_drawing_animation(image, progress, strokes_cache=None, image_path=Non
     if cache_key not in strokes_cache:
         strokes = extract_black_strokes(image)
         strokes.sort(key=len, reverse=True)  # Sort by number of points, longest first
-        stroke_duration = 0.2  # Each stroke takes 20% of the drawing phase to draw
         stroke_timings = []
         if len(strokes) > 1:
             for i, stroke in enumerate(strokes):
@@ -289,7 +189,7 @@ def create_drawing_animation(image, progress, strokes_cache=None, image_path=Non
         # else: not started yet
     return result
 
-def create_loading_indicator(frame, total_frames, dot_count=LOADING_DOT_COUNT, mode='analyzing'):
+def create_loading_indicator(frame, mode='analyzing'):
     """Create a matrix/code style loading indicator with animated pattern and left-aligned text, so the prefix stays fixed. Mode can be 'analyzing' or 'generating'."""
     chars = ['█', '▓', '▒', '░']
     LOADING_HEIGHT = 160
@@ -340,7 +240,7 @@ def create_text_element(text, font_size=140):
     for word in words:
         test_line = current_line + (" " if current_line else "") + word
         bbox = draw.textbbox((0, 0), test_line, font=font)
-        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        w = bbox[2] - bbox[0]
         if w > max_width and current_line:
             lines.append(current_line)
             current_line = word
@@ -358,40 +258,12 @@ def create_text_element(text, font_size=140):
     y = 20
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
-        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        w = bbox[2] - bbox[0]
         draw.text(((VIDEO_WIDTH - w) // 2, y), line, fill=(0,0,0,255), font=font)
         y += line_height
     return text_img
 
-def get_intro_overlay(intro_text, frame_idx, num_frames=45):
-    """Return an RGBA overlay image with the intro text for the given frame index (for fade in/out)."""
-    font_size = 90
-    if FONT_PATH:
-        try:
-            font = ImageFont.truetype(FONT_PATH, font_size)
-        except Exception:
-            font = ImageFont.load_default()
-    else:
-        font = ImageFont.load_default()
-    # Animate opacity (fade in and out)
-    if frame_idx < num_frames // 3:
-        opacity = int(255 * (frame_idx / (num_frames // 3)))
-    elif frame_idx > 2 * num_frames // 3:
-        opacity = int(255 * ((num_frames - frame_idx) / (num_frames // 3)))
-    else:
-        opacity = 255
-    # Draw text centered
-    dummy_img = Image.new('RGBA', (VIDEO_WIDTH, VIDEO_HEIGHT), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(dummy_img)
-    bbox = draw.textbbox((0, 0), intro_text, font=font)
-    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    text_img = Image.new('RGBA', (w, h), (255, 255, 255, 0))
-    text_draw = ImageDraw.Draw(text_img)
-    text_draw.text((0, 0), intro_text, font=font, fill=(*HIGHLIGHT_COLOR, opacity))
-    dummy_img.paste(text_img, ((VIDEO_WIDTH - w) // 2, (VIDEO_HEIGHT - h) // 2), text_img)
-    return dummy_img
-
-def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, image_delay, drawing_phase, frames_per_round, thinking_file, drawing_file, output_audio):
+def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, drawing_phase, frames_per_round, thinking_file, drawing_file, output_audio):
     """
     Create an audio track that alternates between thinking_file and drawing_file
     according to the phase timing for each round, with silence for non-music phases.
@@ -399,7 +271,6 @@ def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, i
     temp_dir = tempfile.mkdtemp()
     segment_files = []
     for i, round_data in enumerate(rounds):
-        round_start = i * frames_per_round
         if i == 0:
             # Round 0: word only, then generating, then drawing, then reveal
             GENERATE_DELAY_FRAMES = int(frames_per_round * 0.18)
@@ -468,14 +339,11 @@ def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, i
 
 def generate_frames(part_number=None):
     """Generate all frames for the animation, passing part_number to title."""
-    intro_text = None
-    intro_overlay_frames = 0
     frames_per_round = int(DURATION * FPS)
     initial_loading = int(frames_per_round * 0.18)  # Increased loading duration
     text_phase = int(frames_per_round * 0.26)       # Slightly reduced text phase
     image_delay = int(frames_per_round * 0.18)      # Increased image delay
     drawing_phase = int(frames_per_round * 0.4)
-    transition_phase = int(frames_per_round * 0.1)
     TOTAL_FRAMES = frames_per_round * TOTAL_ROUNDS
     print(f"Creating {TOTAL_FRAMES} frames for {TOTAL_ROUNDS} rounds...")
     current_scroll = 0
@@ -489,11 +357,10 @@ def generate_frames(part_number=None):
         draw = ImageDraw.Draw(image)
         # Only show the title for the first 3 seconds
         if frame < title_duration_frames:
-            create_title_text(draw, None, part_number=part_number, extra_bold=True, bottom_padding=120)
+            create_title_text(draw, None, part_number=part_number, bottom_padding=120)
         
         # Calculate which round we're on and the progress within that round
         current_round = frame // frames_per_round
-        round_progress = (frame % frames_per_round) / frames_per_round
         frame_in_round = frame % frames_per_round
         
         # Keep track of visible elements for this frame
@@ -509,8 +376,6 @@ def generate_frames(part_number=None):
                         # For the first round, show the word immediately, no loading indicator
                         text = f"{round_data['prompt']}"
                         text_img = create_text_element(text)
-                        # Only add the word once per frame
-                        word_added = False
                         # Add a short delay before showing the 'Generating' loading indicator for the image
                         GENERATE_DELAY_FRAMES = int(frames_per_round * 0.18)
                         if frame_in_round < GENERATE_DELAY_FRAMES:
@@ -520,7 +385,6 @@ def generate_frames(part_number=None):
                                 'y_offset': 0,
                                 'opacity': 255
                             })
-                            word_added = True
                         elif frame_in_round >= GENERATE_DELAY_FRAMES and frame_in_round < GENERATE_DELAY_FRAMES + image_delay - 3:
                             visible_elements.append({
                                 'type': 'text',
@@ -528,14 +392,13 @@ def generate_frames(part_number=None):
                                 'y_offset': 0,
                                 'opacity': 255
                             })
-                            loading_img = create_loading_indicator(frame, FPS, mode='generating')
+                            loading_img = create_loading_indicator(frame, mode='generating')
                             visible_elements.append({
                                 'type': 'loading',
                                 'image': loading_img,
                                 'y_offset': 0,
                                 'opacity': 255
                             })
-                            word_added = True
                         elif frame_in_round >= GENERATE_DELAY_FRAMES + image_delay - 3 and frame_in_round < GENERATE_DELAY_FRAMES + image_delay + drawing_phase - 3:
                             visible_elements.append({
                                 'type': 'text',
@@ -562,7 +425,6 @@ def generate_frames(part_number=None):
                                     })
                                 except Exception as e:
                                     print(f"Error processing image: {e}")
-                            word_added = True
                         else:
                             visible_elements.append({
                                 'type': 'text',
@@ -586,11 +448,10 @@ def generate_frames(part_number=None):
                                     })
                                 except Exception as e:
                                     print(f"Error processing image: {e}")
-                            word_added = True
                     else:
                         # Show initial loading animation for the word
                         if frame_in_round < initial_loading:
-                            loading_img = create_loading_indicator(frame, FPS, mode='analyzing')
+                            loading_img = create_loading_indicator(frame, mode='analyzing')
                             visible_elements.append({
                                 'type': 'loading',
                                 'image': loading_img,
@@ -619,7 +480,7 @@ def generate_frames(part_number=None):
                                 'y_offset': 0,
                                 'opacity': 255
                             })
-                            loading_img = create_loading_indicator(frame, FPS, mode='generating')
+                            loading_img = create_loading_indicator(frame, mode='generating')
                             visible_elements.append({
                                 'type': 'loading',
                                 'image': loading_img,
@@ -767,13 +628,6 @@ def generate_frames(part_number=None):
                         elem['image'] = Image.merge('RGBA', (r, g, b, alpha))
                     image.paste(elem['image'], (0, int(y_pos)), elem['image'])
         
-        # Overlay intro text on the first N frames
-        if frame < intro_overlay_frames:
-            intro_overlay = get_intro_overlay(intro_text, frame, intro_overlay_frames)
-            image = image.convert('RGBA')
-            image.alpha_composite(intro_overlay)
-            image = image.convert('RGB')  # Convert back for saving as PNG
-
         # Save the frame
         frame_path = f"temp_frames/frame_{frame:05d}.png"
         image.save(frame_path)
@@ -879,24 +733,17 @@ def create_video(output_file="pictionary_chain.mp4", custom_audio=None):
             os.remove(temp_video)
 
 def cleanup():
-    """Remove temporary files"""
     print("Cleaning up temporary files...")
     try:
-        import shutil
         # Attempt to clean up the frame files
         for file in os.listdir("temp_frames"):
             try:
                 os.remove(os.path.join("temp_frames", file))
             except:
                 pass
-        
         # Try to remove the directories
         try:
             shutil.rmtree("temp_frames", ignore_errors=True)
-        except:
-            pass
-        try:
-            shutil.rmtree("temp_assets", ignore_errors=True)
         except:
             pass
     except Exception as e:
@@ -1010,7 +857,6 @@ def main():
         image_delay = int(frames_per_round * 0.18)
         drawing_phase = int(frames_per_round * 0.4)
         create_audio_track(
-            total_frames=frames_per_round * TOTAL_ROUNDS,
             fps=FPS,
             rounds=all_rounds,
             initial_loading=initial_loading,

@@ -3,9 +3,7 @@
 
 const axios = require("axios");
 const fs = require("fs");
-const path = require("path");
 const readline = require("readline");
-const FormData = require("form-data");
 
 // Set up readline interface for user input
 const rl = readline.createInterface({

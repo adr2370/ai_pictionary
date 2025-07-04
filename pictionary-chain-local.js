@@ -500,15 +500,12 @@ function encodeImage(imagePath) {
 }
 
 // Function to get a deliberately incorrect but plausible guess for the image
-async function getPlausibleWrongGuess(imagePath, actualWord, usedWords) {
+async function getPlausibleWrongGuess(imagePath) {
   try {
     console.log("Analyzing image and generating a plausible wrong guess...");
     logToFile("Analyzing image and generating a plausible wrong guess...");
 
     const base64Image = encodeImage(imagePath);
-
-    // Convert usedWords Set to an array for the prompt
-    const usedWordsList = Array.from(usedWords).join('", "');
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -550,7 +547,6 @@ async function getPlausibleWrongGuess(imagePath, actualWord, usedWords) {
     // Remove any trailing period, exclamation mark, or question mark
     const cleanedGuess = guess.replace(/[.!?]+$/, "");
 
-    // Double check that the guess isn't in usedWords (case insensitive)
     // Capitalize the guess
     return cleanedGuess.charAt(0).toUpperCase() + cleanedGuess.slice(1);
   } catch (error) {
@@ -662,9 +658,6 @@ async function runGame(numRounds = 10, startWord = null) {
       startWord ||
       STARTER_WORDS[Math.floor(Math.random() * STARTER_WORDS.length)];
 
-    // Keep track of all words used in the game
-    const usedWords = new Set([currentWord]);
-
     console.log("\n🎮 PICTIONARY CHAIN GAME 🎮");
     console.log("=========================");
     console.log(`Starting word: "${currentWord}"`);
@@ -686,11 +679,7 @@ async function runGame(numRounds = 10, startWord = null) {
       }
 
       // Get a wrong guess based on the image
-      const wrongGuess = await getPlausibleWrongGuess(
-        imagePath,
-        currentWord,
-        usedWords
-      );
+      const wrongGuess = await getPlausibleWrongGuess(imagePath);
       if (!wrongGuess) {
         console.error(
           `Failed to get a wrong guess for round ${round}. Stopping game.`
@@ -700,9 +689,6 @@ async function runGame(numRounds = 10, startWord = null) {
         );
         break;
       }
-
-      // Add the wrong guess to used words
-      usedWords.add(wrongGuess);
 
       console.log(`🤔 Wrong guess: "${wrongGuess}"`);
       logToFile(`AI's wrong guess: "${wrongGuess}"\n`);
