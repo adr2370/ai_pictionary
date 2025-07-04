@@ -11,8 +11,8 @@ const { getPictionaryPrompt } = require("./promptTemplates");
 
 // Configuration
 const COMFYUI_API_URL = "http://127.0.0.1:8188"; // Local ComfyUI server address
-const OPENAI_API_KEY =
-  "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"; // Still need this for the guessing part
+const OLLAMA_BASE_URL = "http://localhost:11434"; // Default Ollama URL
+const MODEL_NAME = "llava:7b"; // Using 7b model for lower GPU memory usage
 const GAMES_ROOT = path.join(__dirname, "games");
 if (!fs.existsSync(GAMES_ROOT)) {
   fs.mkdirSync(GAMES_ROOT);
@@ -392,6 +392,23 @@ async function checkComfyUIServer() {
   }
 }
 
+// Function to check if Ollama is running and model is available
+async function checkOllamaStatus() {
+  try {
+    const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`);
+    const availableModels = response.data.models.map((m) => m.name);
+
+    if (!availableModels.some((model) => model.includes("llava"))) {
+      console.log("LLaVA model not found. Please run: ollama pull llava:13b");
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.log("Ollama not running. Please start Ollama first.");
+    return false;
+  }
+}
+
 // Load the ComfyUI workflow template
 function loadWorkflowTemplate() {
   // This is the path to your workflow template JSON file
@@ -500,60 +517,98 @@ function encodeImage(imagePath) {
 }
 
 // Function to get a deliberately incorrect but plausible guess for the image
-async function getPlausibleWrongGuess(imagePath) {
+async function getPlausibleWrongGuess(
+  imagePath,
+  actualWord,
+  recentCorrectGuesses = 0
+) {
   try {
-    console.log("Analyzing image and generating a plausible wrong guess...");
-    logToFile("Analyzing image and generating a plausible wrong guess...");
+    console.log("Analyzing image locally with Ollama...");
+    logToFile("Analyzing image locally with Ollama...");
 
     const base64Image = encodeImage(imagePath);
 
+    // First attempt - don't tell the model the correct answer
+    let prompt = `You are an AI playing Pictionary. Analyze this drawing and respond with ONLY a single word or short phrase that you think it represents. Do not include any explanations, labels, or additional text. Just the guess word/phrase.`;
+
     const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
+      `${OLLAMA_BASE_URL}/api/generate`,
       {
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "system",
-            content: `You are an AI playing Pictionary. Analyze the drawing and provide a plausible but deliberately incorrect guess—a word or short phrase that a human might reasonably guess, but is not the exact right answer. Do not ask questions or provide explanations; just give the guess as a single word or short phrase. 
-**Do not answer "spider web" or anything similar.**`,
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "What does this Pictionary drawing look like? Please give me a plausible WRONG answer—something that's close to what it might be but deliberately incorrect. Just give me the guess as a single word or short phrase, with no explanations.",
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:image/jpeg;base64,${base64Image}`,
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: 100,
+        model: MODEL_NAME,
+        prompt: prompt,
+        images: [base64Image],
+        stream: false,
+        options: {
+          temperature: 1.2,
+          top_p: 0.9,
+          max_tokens: 50,
+        },
       },
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
       }
     );
 
-    const guess = response.data.choices[0].message.content.trim();
+    let guess = response.data.response.trim();
+    guess = guess.replace(/[.!?]+$/, ""); // Remove trailing punctuation
+    guess = guess.charAt(0).toUpperCase() + guess.slice(1); // Capitalize
 
-    // Remove any trailing period, exclamation mark, or question mark
-    const cleanedGuess = guess.replace(/[.!?]+$/, "");
+    // Check if the guess was correct
+    if (guess.toLowerCase().trim() === actualWord.toLowerCase().trim()) {
+      // 30% chance to allow the correct guess
+      const allowCorrectGuess = Math.random() < 0.3;
 
-    // Capitalize the guess
-    return cleanedGuess.charAt(0).toUpperCase() + cleanedGuess.slice(1);
+      if (allowCorrectGuess) {
+        console.log(
+          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`
+        );
+        logToFile(
+          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`
+        );
+      } else {
+        console.log(
+          `Model guessed correctly: "${guess}". Asking for a different guess...`
+        );
+        logToFile(
+          `Model guessed correctly: "${guess}". Asking for a different guess...`
+        );
+
+        // Second attempt - now tell it the correct answer and ask for something else
+        const retryPrompt = `You are an AI playing Pictionary. The actual word being drawn is: "${actualWord}". You guessed correctly, but I need you to provide a DIFFERENT guess - something that is NOT the correct answer. Analyze the drawing and respond with ONLY a single word or short phrase that is plausible but wrong. Do not include any explanations, labels, or additional text. Just the guess word/phrase.`;
+
+        const retryResponse = await axios.post(
+          `${OLLAMA_BASE_URL}/api/generate`,
+          {
+            model: MODEL_NAME,
+            prompt: retryPrompt,
+            images: [base64Image],
+            stream: false,
+            options: {
+              temperature: 1.2,
+              top_p: 0.9,
+              max_tokens: 50,
+            },
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        guess = retryResponse.data.response.trim();
+        guess = guess.replace(/[.!?]+$/, ""); // Remove trailing punctuation
+        guess = guess.charAt(0).toUpperCase() + guess.slice(1); // Capitalize
+      }
+    }
+
+    return guess;
   } catch (error) {
     console.error("Error analyzing image:");
     if (error.response) {
-      console.error("OpenAI response:", error.response.data);
+      console.error("Ollama response:", error.response.data);
     } else {
       console.error(error.message);
     }
@@ -654,6 +709,15 @@ async function runGame(numRounds = 10, startWord = null) {
       return null;
     }
 
+    // Check if Ollama is running and model is available
+    const ollamaAvailable = await checkOllamaStatus();
+    if (!ollamaAvailable) {
+      console.error(
+        "Ollama is not running or LLaVA model is not available. Please start Ollama and pull the llava:13b model."
+      );
+      return null;
+    }
+
     // Use provided start word or select a random starter word
     let currentWord =
       startWord ||
@@ -680,7 +744,7 @@ async function runGame(numRounds = 10, startWord = null) {
       }
 
       // Get a wrong guess based on the image
-      const wrongGuess = await getPlausibleWrongGuess(imagePath);
+      const wrongGuess = await getPlausibleWrongGuess(imagePath, currentWord);
       if (!wrongGuess) {
         console.error(
           `Failed to get a wrong guess for round ${round}. Stopping game.`
@@ -691,8 +755,17 @@ async function runGame(numRounds = 10, startWord = null) {
         break;
       }
 
-      console.log(`🤔 Wrong guess: "${wrongGuess}"`);
-      logToFile(`AI's wrong guess: "${wrongGuess}"\n`);
+      // Check if the guess was correct (this should rarely happen now)
+      const isCorrectGuess =
+        wrongGuess.toLowerCase().trim() === currentWord.toLowerCase().trim();
+
+      if (isCorrectGuess) {
+        console.log(`🎯 Correct guess: "${wrongGuess}"`);
+        logToFile(`AI's correct guess: "${wrongGuess}"\n`);
+      } else {
+        console.log(`🤔 Wrong guess: "${wrongGuess}"`);
+        logToFile(`AI's wrong guess: "${wrongGuess}"\n`);
+      }
 
       // Create a text file for this round
       const roundFilePath = path.join(GAME_DIR, `round_${round}_summary.txt`);
@@ -702,7 +775,8 @@ async function runGame(numRounds = 10, startWord = null) {
           `--------\n` +
           `Actual Word: ${currentWord}\n` +
           `Image File: ${path.basename(imagePath)}\n` +
-          `AI's Wrong Guess: ${wrongGuess}\n`
+          `AI's Guess: ${wrongGuess}\n` +
+          `Was Correct: ${isCorrectGuess}\n`
       );
 
       // Set up for the next round
@@ -727,11 +801,7 @@ async function runGame(numRounds = 10, startWord = null) {
   }
 }
 
-// Check if API key is configured
-if (OPENAI_API_KEY === "your-api-key-here") {
-  console.log("Please set your OpenAI API key in the script before running.");
-  process.exit(1);
-}
+// Ollama service should be running for local image analysis
 
 // Parse command line arguments
 const customStartWord = process.argv[2];
