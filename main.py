@@ -10,6 +10,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
+from googleapiclient.errors import HttpError
 
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
@@ -50,11 +51,12 @@ def generate_video(game_dir, part_number=None):
     return output_path
 
 
-def upload_to_youtube(video_path, part_number=None):
+def upload_to_youtube(video_path, part_number=None, max_retries=50):
     print(f"[4/4] Uploading video to YouTube (Part {part_number})...")
     # Check for client_secrets.json
     if not os.path.exists('client_secrets.json'):
         raise FileNotFoundError("client_secrets.json not found. Please download your OAuth 2.0 credentials and place them in the project directory.")
+    
     SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
     creds = None
     if os.path.exists('token.pickle'):
@@ -68,24 +70,53 @@ def upload_to_youtube(video_path, part_number=None):
             creds = flow.run_local_server(port=0)
         with open('token.pickle', 'wb') as token:
             pickle.dump(creds, token)
+    
     youtube = build('youtube', 'v3', credentials=creds)
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": f"The World's Longest Game of Pictionary Part {part_number}" if part_number else "AI Pictionary Chain Game",
-                "description": "This is the future. We're doomed.",
-                "tags": ["AI", "Pictionary", "Game", "AI Fails", "Comedy", "Funny", "AI Art", "Drawing", "Shorts", "Viral", "Tech Comedy", "AI Generated", "Chain Game", "Automation", "Entertainment"]
-            },
-            "status": {
-                "privacyStatus": "unlisted",
-                "selfDeclaredMadeForKids": False
-            }
-        },
-        media_body=MediaFileUpload(video_path)
-    )
-    response = request.execute()
-    print(f"Video uploaded: https://youtube.com/shorts/{response['id']}")
+    
+    for attempt in range(max_retries):
+        try:
+            request = youtube.videos().insert(
+                part="snippet,status",
+                body={
+                    "snippet": {
+                        "title": f"The World's Longest Game of Pictionary Part {part_number}" if part_number else "AI Pictionary Chain Game",
+                        "description": "This is the future. We're doomed.",
+                        "tags": ["AI", "Pictionary", "Game", "AI Fails", "Comedy", "Funny", "AI Art", "Drawing", "Shorts", "Viral", "Tech Comedy", "AI Generated", "Chain Game", "Automation", "Entertainment"]
+                    },
+                    "status": {
+                        "privacyStatus": "unlisted",
+                        "selfDeclaredMadeForKids": False
+                    }
+                },
+                media_body=MediaFileUpload(video_path)
+            )
+            response = request.execute()
+            print(f"Video uploaded: https://youtube.com/shorts/{response['id']}")
+            return  # Success, exit the retry loop
+            
+        except HttpError as e:
+            error_details = e.error_details[0] if e.error_details else {}
+            reason = error_details.get('reason', '')
+            
+            if reason == 'uploadLimitExceeded':
+                if attempt < max_retries - 1:  # Not the last attempt
+                    wait_time = 3600  # 1 hour in seconds
+                    print(f"Upload limit exceeded. Waiting {wait_time//60} minutes before retry {attempt + 2}/{max_retries}...")
+                    print(f"Next retry will be at: {(datetime.now().timestamp() + wait_time):%H:%M:%S}")
+                    time.sleep(wait_time)
+                    print(f"Retrying upload at: {datetime.now().strftime('%H:%M:%S')}")
+                    continue
+                else:
+                    print(f"Upload limit exceeded after {max_retries} attempts. Giving up.")
+                    raise
+            else:
+                # For other HTTP errors, don't retry
+                print(f"HTTP Error occurred: {e}")
+                raise
+        except Exception as e:
+            # For non-HTTP errors, don't retry
+            print(f"Error during upload: {e}")
+            raise
 
 
 def main():
@@ -93,7 +124,8 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the YouTube upload step.')
     parser.add_argument('--count', type=int, default=1, help='Number of videos to create in a row (default: 1)')
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
-    parser.add_argument('--wait-minutes', type=int, default=30, help='Minutes to wait between uploads (default: 30)')
+    parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads (default: 60)')
+    parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
     args = parser.parse_args()
 
     try:
@@ -106,7 +138,7 @@ def main():
             if args.dry_run:
                 print("[DRY RUN] Skipping YouTube upload.")
             else:
-                upload_to_youtube(video_path, part_number=part_number)
+                upload_to_youtube(video_path, part_number=part_number, max_retries=args.max_retries)
             print(f"All steps completed for Part {part_number}.")
             
             # Wait between uploads (except for the last one)
