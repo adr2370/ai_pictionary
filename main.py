@@ -102,7 +102,9 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50):
                 if attempt < max_retries - 1:  # Not the last attempt
                     wait_time = 3600  # 1 hour in seconds
                     print(f"Upload limit exceeded. Waiting {wait_time//60} minutes before retry {attempt + 2}/{max_retries}...")
-                    print(f"Next retry will be at: {(datetime.now().timestamp() + wait_time):%H:%M:%S}")
+                    next_retry_time = datetime.now().timestamp() + wait_time
+                    next_retry_datetime = datetime.fromtimestamp(next_retry_time)
+                    print(f"Next retry will be at: {next_retry_datetime.strftime('%H:%M:%S')}")
                     time.sleep(wait_time)
                     print(f"Retrying upload at: {datetime.now().strftime('%H:%M:%S')}")
                     continue
