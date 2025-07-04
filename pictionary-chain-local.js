@@ -1,12 +1,22 @@
 // Pictionary Chain Game Generator using Local ComfyUI
 // This script chains together image generation and guessing in a loop
 // creating a fun sequence of pictionary drawings and guesses
+//
+// NEW: This script now automatically starts and stops ComfyUI and Ollama as needed.
+// No need to manually start ComfyUI or Ollama before running the script.
+// The script will:
+// 1. Check if ComfyUI and Ollama are already running
+// 2. Start ComfyUI and Ollama if they're not running
+// 3. Run the pictionary game
+// 4. Stop ComfyUI and Ollama when the game is complete (only if we started them)
+// 5. Handle cleanup on script interruption (Ctrl+C)
 
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const { promisify } = require("util");
 const exec = promisify(require("child_process").exec);
+const { spawn } = require("child_process");
 const { getPictionaryPrompt } = require("./promptTemplates");
 
 // Configuration
@@ -18,6 +28,13 @@ if (!fs.existsSync(GAMES_ROOT)) {
   fs.mkdirSync(GAMES_ROOT);
 }
 const GAME_DIR = path.join(GAMES_ROOT, "pictionary_game_" + Date.now());
+
+// Process management
+let comfyuiProcess = null;
+let comfyuiStartedByUs = false;
+let ollamaProcess = null;
+let ollamaStartedByUs = false;
+const COMFYUI_DIR = path.join(__dirname, "ComfyUI");
 
 // List of starter words for the first round
 const STARTER_WORDS = [
@@ -382,6 +399,349 @@ function logToFile(message) {
   fs.appendFileSync(LOG_FILE, message + "\n");
 }
 
+// Start ComfyUI server
+async function startComfyUI() {
+  try {
+    // Check if ComfyUI is already running
+    const alreadyRunning = await checkComfyUIServer();
+    if (alreadyRunning) {
+      console.log("ComfyUI server is already running.");
+      logToFile("ComfyUI server is already running.");
+      comfyuiStartedByUs = false; // We didn't start it
+      return true;
+    }
+
+    console.log("Starting ComfyUI server...");
+    logToFile("Starting ComfyUI server...");
+
+    // Check if ComfyUI directory exists
+    if (!fs.existsSync(COMFYUI_DIR)) {
+      throw new Error(
+        `ComfyUI directory not found at ${COMFYUI_DIR}. Please make sure ComfyUI is installed in the ComfyUI subdirectory.`
+      );
+    }
+
+    // Check if main.py exists in ComfyUI directory
+    const mainPyPath = path.join(COMFYUI_DIR, "main.py");
+    if (!fs.existsSync(mainPyPath)) {
+      throw new Error(
+        `ComfyUI main.py not found at ${mainPyPath}. Please make sure ComfyUI is properly installed.`
+      );
+    }
+
+    // Start ComfyUI process
+    let pythonPath = process.platform === "win32" ? "python" : "python3";
+
+    // Try to find Python executable
+    try {
+      await exec(`${pythonPath} --version`);
+    } catch (error) {
+      // Try alternative Python command
+      const altPythonPath = process.platform === "win32" ? "python3" : "python";
+      try {
+        await exec(`${altPythonPath} --version`);
+        pythonPath = altPythonPath;
+      } catch (altError) {
+        throw new Error(
+          `Python not found. Please make sure Python is installed and available in your PATH.`
+        );
+      }
+    }
+
+    comfyuiProcess = spawn(pythonPath, ["main.py"], {
+      cwd: COMFYUI_DIR,
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: false,
+    });
+
+    // Suppress all ComfyUI output
+    comfyuiProcess.stdout.on("data", () => {});
+    comfyuiProcess.stderr.on("data", () => {});
+
+    comfyuiProcess.on("error", (error) => {
+      console.error("Failed to start ComfyUI:", error.message);
+      logToFile(`Failed to start ComfyUI: ${error.message}`);
+    });
+
+    // Wait for ComfyUI to start up
+    console.log("Waiting for ComfyUI to start...");
+    logToFile("Waiting for ComfyUI to start...");
+
+    let attempts = 0;
+    const maxAttempts = 60; // Wait up to 60 seconds
+
+    while (attempts < maxAttempts) {
+      try {
+        const response = await axios.get(`${COMFYUI_API_URL}/system_stats`, {
+          timeout: 2000,
+        });
+        if (response.status === 200) {
+          console.log("ComfyUI server started successfully!");
+          logToFile("ComfyUI server started successfully!");
+          comfyuiStartedByUs = true; // We started it
+          return true;
+        }
+      } catch (error) {
+        // Server not ready yet, continue waiting
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      attempts++;
+    }
+
+    throw new Error("ComfyUI failed to start within the timeout period");
+  } catch (error) {
+    console.error("Error starting ComfyUI:", error.message);
+    logToFile(`Error starting ComfyUI: ${error.message}`);
+
+    // Clean up the process if it was created
+    if (comfyuiProcess) {
+      try {
+        comfyuiProcess.kill("SIGKILL");
+      } catch (killError) {
+        console.error("Error killing ComfyUI process:", killError.message);
+      }
+      comfyuiProcess = null;
+    }
+
+    return false;
+  }
+}
+
+// Stop ComfyUI server
+async function stopComfyUI() {
+  try {
+    // Only stop if we started it
+    if (!comfyuiStartedByUs) {
+      console.log("ComfyUI was not started by us, leaving it running.");
+      logToFile("ComfyUI was not started by us, leaving it running.");
+      return;
+    }
+
+    if (comfyuiProcess) {
+      console.log("Stopping ComfyUI server...");
+      logToFile("Stopping ComfyUI server...");
+
+      // Get the process ID and kill all child processes
+      const pid = comfyuiProcess.pid;
+
+      try {
+        // On Windows, use taskkill to kill the process tree
+        if (process.platform === "win32") {
+          await exec(`taskkill /F /T /PID ${pid}`);
+        } else {
+          // On Unix-like systems, kill the process group
+          process.kill(-pid, "SIGTERM");
+
+          // Wait a bit then force kill if needed
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch (e) {
+            // Process might already be dead
+          }
+        }
+      } catch (killError) {
+        console.log(
+          "Process kill error (might already be dead):",
+          killError.message
+        );
+      }
+
+      // Wait for the process to terminate
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          console.log("Force killing remaining ComfyUI processes...");
+          logToFile("Force killing remaining ComfyUI processes...");
+
+          // Try to kill any remaining python processes that might be ComfyUI
+          if (process.platform === "win32") {
+            exec("taskkill /F /IM python.exe").catch(() => {});
+          } else {
+            exec("pkill -f 'python.*main.py'").catch(() => {});
+          }
+          resolve();
+        }, 3000); // Wait 3 seconds before force kill
+
+        comfyuiProcess.on("close", (code) => {
+          clearTimeout(timeout);
+          console.log(`ComfyUI process exited with code ${code}`);
+          logToFile(`ComfyUI process exited with code ${code}`);
+          resolve();
+        });
+      });
+
+      comfyuiProcess = null;
+      comfyuiStartedByUs = false;
+      console.log("ComfyUI server stopped successfully!");
+      logToFile("ComfyUI server stopped successfully!");
+    }
+  } catch (error) {
+    console.error("Error stopping ComfyUI:", error.message);
+    logToFile(`Error stopping ComfyUI: ${error.message}`);
+  }
+}
+
+// Start Ollama service
+async function startOllama() {
+  try {
+    // Check if Ollama is already running
+    const alreadyRunning = await checkOllamaStatus();
+    if (alreadyRunning) {
+      console.log("Ollama service is already running.");
+      logToFile("Ollama service is already running.");
+      ollamaStartedByUs = false; // We didn't start it
+      return true;
+    }
+
+    console.log("Starting Ollama service...");
+    logToFile("Starting Ollama service...");
+
+    // Start Ollama process
+    const ollamaPath = process.platform === "win32" ? "ollama" : "ollama";
+
+    // Try to find Ollama executable
+    try {
+      await exec(`${ollamaPath} --version`);
+    } catch (error) {
+      throw new Error(
+        `Ollama not found. Please make sure Ollama is installed and available in your PATH.`
+      );
+    }
+
+    ollamaProcess = spawn(ollamaPath, ["serve"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: false,
+    });
+
+    // Suppress all Ollama output
+    ollamaProcess.stdout.on("data", () => {});
+    ollamaProcess.stderr.on("data", () => {});
+
+    ollamaProcess.on("error", (error) => {
+      console.error("Failed to start Ollama:", error.message);
+      logToFile(`Failed to start Ollama: ${error.message}`);
+    });
+
+    // Wait for Ollama to start up
+    console.log("Waiting for Ollama to start...");
+    logToFile("Waiting for Ollama to start...");
+
+    let attempts = 0;
+    const maxAttempts = 30; // Wait up to 30 seconds
+
+    while (attempts < maxAttempts) {
+      try {
+        const response = await axios.get(`${OLLAMA_BASE_URL}/api/tags`, {
+          timeout: 2000,
+        });
+        if (response.status === 200) {
+          console.log("Ollama service started successfully!");
+          logToFile("Ollama service started successfully!");
+          ollamaStartedByUs = true; // We started it
+          return true;
+        }
+      } catch (error) {
+        // Server not ready yet, continue waiting
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      attempts++;
+    }
+
+    throw new Error("Ollama failed to start within the timeout period");
+  } catch (error) {
+    console.error("Error starting Ollama:", error.message);
+    logToFile(`Error starting Ollama: ${error.message}`);
+
+    // Clean up the process if it was created
+    if (ollamaProcess) {
+      try {
+        ollamaProcess.kill("SIGKILL");
+      } catch (killError) {
+        console.error("Error killing Ollama process:", killError.message);
+      }
+      ollamaProcess = null;
+    }
+
+    return false;
+  }
+}
+
+// Stop Ollama service
+async function stopOllama() {
+  try {
+    // Only stop if we started it
+    if (!ollamaStartedByUs) {
+      console.log("Ollama was not started by us, leaving it running.");
+      logToFile("Ollama was not started by us, leaving it running.");
+      return;
+    }
+
+    if (ollamaProcess) {
+      console.log("Stopping Ollama service...");
+      logToFile("Stopping Ollama service...");
+
+      // Get the process ID and kill all child processes
+      const pid = ollamaProcess.pid;
+
+      try {
+        // On Windows, use taskkill to kill the process tree
+        if (process.platform === "win32") {
+          await exec(`taskkill /F /T /PID ${pid}`);
+        } else {
+          // On Unix-like systems, kill the process group
+          process.kill(-pid, "SIGTERM");
+
+          // Wait a bit then force kill if needed
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          try {
+            process.kill(-pid, "SIGKILL");
+          } catch (e) {
+            // Process might already be dead
+          }
+        }
+      } catch (killError) {
+        console.log(
+          "Process kill error (might already be dead):",
+          killError.message
+        );
+      }
+
+      // Wait for the process to terminate
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          console.log("Force killing remaining Ollama processes...");
+          logToFile("Force killing remaining Ollama processes...");
+
+          // Try to kill any remaining ollama processes
+          if (process.platform === "win32") {
+            exec("taskkill /F /IM ollama.exe").catch(() => {});
+          } else {
+            exec("pkill -f ollama").catch(() => {});
+          }
+          resolve();
+        }, 3000); // Wait 3 seconds before force kill
+
+        ollamaProcess.on("close", (code) => {
+          clearTimeout(timeout);
+          console.log(`Ollama process exited with code ${code}`);
+          logToFile(`Ollama process exited with code ${code}`);
+          resolve();
+        });
+      });
+
+      ollamaProcess = null;
+      ollamaStartedByUs = false;
+      console.log("Ollama service stopped successfully!");
+      logToFile("Ollama service stopped successfully!");
+    }
+  } catch (error) {
+    console.error("Error stopping Ollama:", error.message);
+    logToFile(`Error stopping Ollama: ${error.message}`);
+  }
+}
+
 // Check if ComfyUI server is running
 async function checkComfyUIServer() {
   try {
@@ -700,21 +1060,24 @@ function createHtmlIndex(numRounds) {
 // Main function to run the game
 async function runGame(numRounds = 10, startWord = null) {
   try {
-    // Check if ComfyUI server is running
-    const serverRunning = await checkComfyUIServer();
-    if (!serverRunning) {
-      console.error(
-        "ComfyUI server is not running. Please start the server first."
-      );
+    // Start ComfyUI server
+    const serverStarted = await startComfyUI();
+    if (!serverStarted) {
+      console.error("Failed to start ComfyUI server. Stopping game.");
       return null;
     }
 
-    // Check if Ollama is running and model is available
-    const ollamaAvailable = await checkOllamaStatus();
-    if (!ollamaAvailable) {
-      console.error(
-        "Ollama is not running or LLaVA model is not available. Please start Ollama and pull the llava:13b model."
-      );
+    // Start Ollama service
+    const ollamaStarted = await startOllama();
+    if (!ollamaStarted) {
+      console.error("Failed to start Ollama service. Stopping game.");
+      return null;
+    }
+
+    // Load the Ollama model into memory
+    const modelLoaded = await loadOllamaModel();
+    if (!modelLoaded) {
+      console.error("Failed to load Ollama model. Stopping game.");
       return null;
     }
 
@@ -793,15 +1156,58 @@ async function runGame(numRounds = 10, startWord = null) {
     // Create an index.html file to view all results
     createHtmlIndex(numRounds);
 
+    // Stop Ollama service
+    await stopOllama();
+
+    // Stop ComfyUI server
+    await stopComfyUI();
+
     return GAME_DIR;
   } catch (error) {
     console.error("Game error:", error);
     logToFile(`Game error: ${error.message}`);
+
+    // Try to stop Ollama even if there was an error
+    try {
+      await stopOllama();
+    } catch (stopError) {
+      console.error(
+        "Error stopping Ollama after game error:",
+        stopError.message
+      );
+    }
+
+    // Try to stop ComfyUI even if there was an error
+    try {
+      await stopComfyUI();
+    } catch (stopError) {
+      console.error(
+        "Error stopping ComfyUI after game error:",
+        stopError.message
+      );
+    }
+
     return null;
   }
 }
 
 // Ollama service should be running for local image analysis
+
+// Cleanup function to handle script termination
+async function cleanup() {
+  console.log("\nCleaning up...");
+  try {
+    await stopComfyUI();
+    await stopOllama();
+  } catch (error) {
+    console.error("Error during cleanup:", error.message);
+  }
+  process.exit(0);
+}
+
+// Handle process termination signals
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
 
 // Parse command line arguments
 const customStartWord = process.argv[2];
@@ -816,3 +1222,32 @@ runGame(10, customStartWord)
   .catch((error) => {
     console.error("Failed to run game:", error);
   });
+
+// Function to ensure the Ollama model is available
+async function loadOllamaModel() {
+  try {
+    console.log(`Ensuring Ollama model ${MODEL_NAME} is available...`);
+    logToFile(`Ensuring Ollama model ${MODEL_NAME} is available...`);
+
+    const response = await axios.post(
+      `${OLLAMA_BASE_URL}/api/pull`,
+      {
+        name: MODEL_NAME,
+        stream: false,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(`Model ${MODEL_NAME} is available and ready to use`);
+    logToFile(`Model ${MODEL_NAME} is available and ready to use`);
+    return true;
+  } catch (error) {
+    console.error("Error ensuring Ollama model availability:", error.message);
+    logToFile(`Error ensuring Ollama model availability: ${error.message}`);
+    return false;
+  }
+}
