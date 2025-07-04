@@ -137,6 +137,23 @@ For local image generation (recommended for cost savings):
 
 ## 🎯 Usage
 
+### Main Orchestrator Script
+
+The `main.py` script orchestrates the complete workflow:
+
+```bash
+python main.py [options]
+```
+
+**Available Options**:
+
+- `--dry-run`: Run everything except YouTube upload (for testing)
+- `--count N`: Number of videos to create in a row (default: 1)
+- `--start-part N`: Part number to start on (default: 1)
+- `--wait-minutes N`: Minutes to wait between uploads (default: 60)
+- `--max-retries N`: Maximum retries for upload limit errors (default: 50)
+- `--chain-games`: Use last guess from each game as starting word for next game
+
 ### Running a Complete Game Session
 
 1. **Start the main game**:
@@ -155,6 +172,31 @@ For local image generation (recommended for cost savings):
    ```bash
    python pictionary-python-generator.py --game-dir pictionary_game_[timestamp]
    ```
+
+### Running Multiple Games with Chain Linking
+
+Use the main orchestrator script to run multiple games and optionally chain them together:
+
+```bash
+# Run a single game with video generation and YouTube upload
+python main.py
+
+# Run 3 games in a row, each starting with a random word
+python main.py --count 3
+
+# Run 3 games in a chain - each game starts with the last guess from the previous game
+python main.py --count 3 --chain-games
+
+# Run games in chain mode with custom settings
+python main.py --count 5 --chain-games --wait-minutes 30 --start-part 1
+```
+
+**Chain Mode Benefits**:
+
+- Creates a continuous narrative across multiple games
+- Each game builds on the previous one's "misunderstanding"
+- Perfect for creating series of related content
+- Maintains viewer engagement across multiple videos
 
 ### Individual Components
 

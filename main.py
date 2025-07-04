@@ -4,6 +4,7 @@ import sys
 import argparse
 import glob
 import time
+import re
 from datetime import datetime
 import pickle
 from googleapiclient.discovery import build
@@ -18,9 +19,49 @@ VIDEO_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-python-genera
 NODE_GAME_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-chain-local.js')
 
 
-def run_js_game():
+def extract_last_guess_from_game(game_dir):
+    """Extract the last guess from a game directory by reading the final round's summary file."""
+    try:
+        # Find all round summary files
+        summary_files = glob.glob(os.path.join(game_dir, 'round_*_summary.txt'))
+        if not summary_files:
+            print(f"No summary files found in {game_dir}")
+            return None
+        
+        # Sort by round number to find the last one
+        def extract_round_number(filename):
+            match = re.search(r'round_(\d+)_summary\.txt', os.path.basename(filename))
+            return int(match.group(1)) if match else 0
+        
+        summary_files.sort(key=extract_round_number)
+        last_summary_file = summary_files[-1]
+        
+        # Read the last summary file
+        with open(last_summary_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract the AI's guess from the summary
+        guess_match = re.search(r"AI's Guess: (.+)", content)
+        if guess_match:
+            last_guess = guess_match.group(1).strip()
+            print(f"Extracted last guess from previous game: '{last_guess}'")
+            return last_guess
+        else:
+            print(f"Could not find AI's guess in {last_summary_file}")
+            return None
+            
+    except Exception as e:
+        print(f"Error extracting last guess from {game_dir}: {e}")
+        return None
+
+
+def run_js_game(start_word=None):
     print("[1/4] Running Pictionary game (Node.js)...")
-    result = subprocess.run(['node', NODE_GAME_SCRIPT], check=True)
+    cmd = ['node', NODE_GAME_SCRIPT]
+    if start_word:
+        cmd.append(start_word)
+        print(f"Starting with word: '{start_word}'")
+    result = subprocess.run(cmd, check=True)
     print("Game finished.")
 
 
@@ -128,14 +169,31 @@ def main():
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
     parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
+    parser.add_argument('--chain-games', action='store_true', help='Use the last guess from each game as the starting word for the next game (creates a continuous chain)')
     args = parser.parse_args()
 
     try:
+        previous_game_dir = None
         for i in range(args.count):
             part_number = args.start_part + i
             print(f"\n=== Starting video creation for Part {part_number} ===")
-            run_js_game()
+            
+            # For the first game, use no start word (random). For subsequent games, use the last guess from the previous game if chaining is enabled.
+            start_word = None
+            if args.chain_games and i > 0 and previous_game_dir:
+                start_word = extract_last_guess_from_game(previous_game_dir)
+                if start_word:
+                    print(f"Using last guess from previous game as starting word: '{start_word}'")
+                else:
+                    print("Could not extract last guess from previous game, using random word")
+            elif args.chain_games and i == 0:
+                print("First game in chain - using random starting word")
+            elif not args.chain_games:
+                print("Chain mode disabled - each game starts with a random word")
+            
+            run_js_game(start_word)
             game_dir = find_latest_game_dir()
+            previous_game_dir = game_dir  # Store for next iteration
             video_path = generate_video(game_dir, part_number=part_number)
             if args.dry_run:
                 print("[DRY RUN] Skipping YouTube upload.")
