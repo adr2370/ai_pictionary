@@ -257,16 +257,14 @@ def create_drawing_animation(image, progress, strokes_cache={}):
     cache_key = (id(image), image.size)
     if cache_key not in strokes_cache:
         strokes = extract_black_strokes(image)
-        random.seed(42)
-        random.shuffle(strokes)
-        total_strokes = len(strokes)
+        strokes.sort(key=len, reverse=True)  # Sort by number of points, longest first
         stroke_duration = 0.2  # Each stroke takes 20% of the drawing phase to draw
         stroke_timings = []
-        if total_strokes > 1:
+        if len(strokes) > 1:
             for i, stroke in enumerate(strokes):
-                start = i * (1 - stroke_duration) / (total_strokes - 1)
-                end = start + stroke_duration
-                if random.random() < 0.5:
+                start = i / len(strokes)
+                end = 1.0
+                if i % 2 == 1:
                     stroke = list(reversed(stroke))
                 stroke_timings.append((stroke, start, end))
         else:
