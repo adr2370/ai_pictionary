@@ -413,7 +413,7 @@ def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, i
             # 2. Generating (thinking.flac)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r0_gen.wav")
-                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
                 segment_files.append(gen)
             # 3. Drawing (drawing.mp3)
             if drawing_phase > 0:
@@ -435,7 +435,7 @@ def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, i
             # 1. Analyzing (thinking.flac)
             if initial_loading > 0:
                 ana = os.path.join(temp_dir, f"r{i}_ana.wav")
-                os.system(f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"')
+                os.system(f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"')
                 segment_files.append(ana)
             # 2. Word only (silence)
             if text_phase > 0:
@@ -445,7 +445,7 @@ def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, i
             # 3. Generating (thinking.flac)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r{i}_gen.wav")
-                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
                 segment_files.append(gen)
             # 4. Drawing (drawing.mp3)
             if drawing_phase > 0:
@@ -521,7 +521,7 @@ def generate_frames(part_number=None):
                                 'opacity': 255
                             })
                             word_added = True
-                        if frame_in_round >= GENERATE_DELAY_FRAMES and frame_in_round < GENERATE_DELAY_FRAMES + image_delay:
+                        elif frame_in_round >= GENERATE_DELAY_FRAMES and frame_in_round < GENERATE_DELAY_FRAMES + image_delay - 3:
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -536,7 +536,7 @@ def generate_frames(part_number=None):
                                 'opacity': 255
                             })
                             word_added = True
-                        if frame_in_round >= GENERATE_DELAY_FRAMES + image_delay and frame_in_round < GENERATE_DELAY_FRAMES + image_delay + drawing_phase:
+                        elif frame_in_round >= GENERATE_DELAY_FRAMES + image_delay - 3 and frame_in_round < GENERATE_DELAY_FRAMES + image_delay + drawing_phase - 3:
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -551,7 +551,7 @@ def generate_frames(part_number=None):
                                     new_width = int(img_width * ratio)
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay)) / drawing_phase))
+                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay - 3)) / (drawing_phase - 3)))
                                     animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
@@ -563,7 +563,7 @@ def generate_frames(part_number=None):
                                 except Exception as e:
                                     print(f"Error processing image: {e}")
                             word_added = True
-                        if frame_in_round >= GENERATE_DELAY_FRAMES + image_delay + drawing_phase:
+                        else:
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -598,7 +598,7 @@ def generate_frames(part_number=None):
                                 'opacity': 255
                             })
                         # Show text after initial_loading
-                        elif frame_in_round >= initial_loading and frame_in_round < initial_loading + text_phase:
+                        elif frame_in_round >= initial_loading and frame_in_round < initial_loading + text_phase - 3:
                             text = f"{round_data['prompt']}"
                             text_img = create_text_element(text)
                             text_opacity = min(255, int((frame_in_round - initial_loading) / (text_phase * 0.2) * 255))
@@ -609,7 +609,7 @@ def generate_frames(part_number=None):
                                 'opacity': text_opacity
                             })
                         # Show loading indicator for the image (short, only during image_delay), but keep the word visible above
-                        if frame_in_round >= initial_loading + text_phase and frame_in_round < initial_loading + text_phase + image_delay:
+                        if frame_in_round >= initial_loading + text_phase - 3 and frame_in_round < initial_loading + text_phase + image_delay - 3:
                             # Ensure the word is visible above the loading indicator
                             text = f"{round_data['prompt']}"
                             text_img = create_text_element(text)
@@ -627,7 +627,7 @@ def generate_frames(part_number=None):
                                 'opacity': 255
                             })
                         # Show image drawing animation during drawing_phase
-                        if frame_in_round >= initial_loading + text_phase + image_delay and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase:
+                        if frame_in_round >= initial_loading + text_phase + image_delay - 3 and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase - 3:
                             # Ensure the word is visible above the image
                             text = f"{round_data['prompt']}"
                             text_img = create_text_element(text)
@@ -645,7 +645,7 @@ def generate_frames(part_number=None):
                                     new_width = int(img_width * ratio)
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (initial_loading + text_phase + image_delay)) / drawing_phase))
+                                    drawing_progress = min(1.0, max(0.0, (frame_in_round - (initial_loading + text_phase + image_delay - 3)) / (drawing_phase - 3)))
                                     animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
@@ -657,7 +657,7 @@ def generate_frames(part_number=None):
                                 except Exception as e:
                                     print(f"Error processing image: {e}")
                         # Show fully revealed image after drawing phase
-                        if frame_in_round >= initial_loading + text_phase + image_delay + drawing_phase:
+                        if frame_in_round >= initial_loading + text_phase + image_delay + drawing_phase - 3 and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase:
                             # Ensure the word is visible above the image
                             text = f"{round_data['prompt']}"
                             text_img = create_text_element(text)
