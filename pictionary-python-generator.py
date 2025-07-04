@@ -8,6 +8,8 @@ import datetime
 import re
 import random
 from collections import deque
+import tempfile
+import shutil
 
 # Create directories
 os.makedirs("temp_frames", exist_ok=True)
@@ -389,6 +391,81 @@ def get_intro_overlay(intro_text, frame_idx, num_frames=45):
     dummy_img.paste(text_img, ((VIDEO_WIDTH - w) // 2, (VIDEO_HEIGHT - h) // 2), text_img)
     return dummy_img
 
+def create_audio_track(total_frames, fps, rounds, initial_loading, text_phase, image_delay, drawing_phase, frames_per_round, thinking_file, drawing_file, output_audio):
+    """
+    Create an audio track that alternates between thinking_file and drawing_file
+    according to the phase timing for each round, with silence for non-music phases.
+    """
+    temp_dir = tempfile.mkdtemp()
+    segment_files = []
+    for i, round_data in enumerate(rounds):
+        round_start = i * frames_per_round
+        if i == 0:
+            # Round 0: word only, then generating, then drawing, then reveal
+            GENERATE_DELAY_FRAMES = int(frames_per_round * 0.18)
+            image_delay = int(frames_per_round * 0.18)
+            drawing_phase = int(frames_per_round * 0.4)
+            # 1. Word only (no music)
+            if GENERATE_DELAY_FRAMES > 0:
+                silence1 = os.path.join(temp_dir, f"r0_silence1.wav")
+                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {GENERATE_DELAY_FRAMES / fps} "{silence1}"')
+                segment_files.append(silence1)
+            # 2. Generating (thinking.flac)
+            if image_delay > 0:
+                gen = os.path.join(temp_dir, f"r0_gen.wav")
+                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                segment_files.append(gen)
+            # 3. Drawing (drawing.mp3)
+            if drawing_phase > 0:
+                draw = os.path.join(temp_dir, f"r0_draw.wav")
+                os.system(f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"')
+                segment_files.append(draw)
+            # 4. Reveal (rest, silence)
+            reveal_frames = frames_per_round - (GENERATE_DELAY_FRAMES + image_delay + drawing_phase)
+            if reveal_frames > 0:
+                silence2 = os.path.join(temp_dir, f"r0_silence2.wav")
+                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"')
+                segment_files.append(silence2)
+        else:
+            # Round 1+: analyzing, word, generating, drawing, reveal
+            initial_loading = int(frames_per_round * 0.18)
+            text_phase = int(frames_per_round * 0.26)
+            image_delay = int(frames_per_round * 0.18)
+            drawing_phase = int(frames_per_round * 0.4)
+            # 1. Analyzing (thinking.flac)
+            if initial_loading > 0:
+                ana = os.path.join(temp_dir, f"r{i}_ana.wav")
+                os.system(f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"')
+                segment_files.append(ana)
+            # 2. Word only (silence)
+            if text_phase > 0:
+                silence1 = os.path.join(temp_dir, f"r{i}_silence1.wav")
+                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {text_phase / fps} "{silence1}"')
+                segment_files.append(silence1)
+            # 3. Generating (thinking.flac)
+            if image_delay > 0:
+                gen = os.path.join(temp_dir, f"r{i}_gen.wav")
+                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.5,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                segment_files.append(gen)
+            # 4. Drawing (drawing.mp3)
+            if drawing_phase > 0:
+                draw = os.path.join(temp_dir, f"r{i}_draw.wav")
+                os.system(f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"')
+                segment_files.append(draw)
+            # 5. Reveal (rest, silence)
+            reveal_frames = frames_per_round - (initial_loading + text_phase + image_delay + drawing_phase)
+            if reveal_frames > 0:
+                silence2 = os.path.join(temp_dir, f"r{i}_silence2.wav")
+                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"')
+                segment_files.append(silence2)
+    # Concatenate all segments
+    concat_file = os.path.join(temp_dir, "concat.txt")
+    with open(concat_file, "w") as f:
+        for seg in segment_files:
+            f.write(f"file '{seg}'\n")
+    os.system(f'ffmpeg -y -f concat -safe 0 -i "{concat_file}" -c copy "{output_audio}"')
+    shutil.rmtree(temp_dir)
+
 def generate_frames(part_number=None):
     """Generate all frames for the animation, passing part_number to title."""
     intro_text = None
@@ -706,7 +783,7 @@ def generate_frames(part_number=None):
             completion = (frame + 1) / TOTAL_FRAMES * 100
             print(f"Generated frame {frame+1}/{TOTAL_FRAMES} ({completion:.1f}%)")
 
-def create_video(output_file="pictionary_chain.mp4", music_file=None):
+def create_video(output_file="pictionary_chain.mp4", custom_audio=None):
     """Combine frames into a video using ffmpeg"""
     print("Creating video from frames...")
     
@@ -778,24 +855,28 @@ def create_video(output_file="pictionary_chain.mp4", music_file=None):
         subprocess.run(alt_ffmpeg_cmd)
         print(f"Video created: {output_file}")
     
-    # Add music if specified
-    if music_file and os.path.exists(music_file):
-        print(f"Adding background music from {music_file}...")
-        audio_output = os.path.splitext(output_file)[0] + "_with_audio.mp4"
-        
+    # Always add custom audio if present
+    if custom_audio and os.path.exists(custom_audio):
+        print(f"Adding custom audio from {custom_audio}...")
+        temp_video = output_file + ".tmp.mp4"
+        # Rename the original video to a temp file
+        os.rename(output_file, temp_video)
         ffmpeg_audio_cmd = [
             "ffmpeg", "-y",
-            "-i", output_file,
-            "-i", music_file,
+            "-i", temp_video,
+            "-i", custom_audio,
             "-map", "0:v", 
             "-map", "1:a",
             "-c:v", "copy",
             "-c:a", "aac",
             "-shortest",
-            audio_output
+            output_file
         ]
         subprocess.run(ffmpeg_audio_cmd)
-        print(f"Video with audio created: {audio_output}")
+        print(f"Video with audio created: {output_file}")
+        # Remove the temp video file
+        if os.path.exists(temp_video):
+            os.remove(temp_video)
 
 def cleanup():
     """Remove temporary files"""
@@ -873,8 +954,6 @@ def main():
                         help=f'Frames per second (default: {DEFAULT_FPS})')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Output video filename (default: auto-generated with timestamp)')
-    parser.add_argument('--music', '-m', type=str, default=None,
-                        help='Background music file (optional)')
     parser.add_argument('--font', type=str, default=None,
                         help='Path to a font file to use (optional, will use system font if not specified)')
     parser.add_argument('--max-rounds', type=int, default=None,
@@ -921,9 +1000,32 @@ def main():
     TOTAL_ROUNDS = len(all_rounds)
     print(f"Creating animation with {TOTAL_ROUNDS} rounds")
     
+    # Always generate custom audio track if music files are present
+    custom_audio = None
+    if os.path.exists("thinking.flac") and os.path.exists("drawing.mp3"):
+        custom_audio = os.path.join(args.game_dir, "custom_audio.wav")
+        frames_per_round = int(DURATION * FPS)
+        initial_loading = int(frames_per_round * 0.18)
+        text_phase = int(frames_per_round * 0.26)
+        image_delay = int(frames_per_round * 0.18)
+        drawing_phase = int(frames_per_round * 0.4)
+        create_audio_track(
+            total_frames=frames_per_round * TOTAL_ROUNDS,
+            fps=FPS,
+            rounds=all_rounds,
+            initial_loading=initial_loading,
+            text_phase=text_phase,
+            image_delay=image_delay,
+            drawing_phase=drawing_phase,
+            frames_per_round=frames_per_round,
+            thinking_file="thinking.flac",
+            drawing_file="drawing.mp3",
+            output_audio=custom_audio
+        )
+    
     # Run the generation process
     generate_frames(part_number=args.part)
-    create_video(output_path, args.music)
+    create_video(output_path, custom_audio=custom_audio)
     cleanup()
     
     print(f"Process completed successfully! Video saved as: {output_path}")
