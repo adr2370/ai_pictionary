@@ -417,10 +417,11 @@ async function generateImage(prompt, roundNumber) {
     // Load the workflow template
     const workflow = loadWorkflowTemplate();
 
-    // Update the prompt in the workflow
-    // This assumes your workflow has a node with the class_type "CLIPTextEncode"
-    // Modify this to match your actual workflow structure
+    // Set a random seed for the KSampler node
     for (const nodeId in workflow) {
+      if (workflow[nodeId]._meta.title === "KSampler") {
+        workflow[nodeId].inputs.seed = Math.floor(Math.random() * 4294967295); // 32-bit unsigned int
+      }
       if (workflow[nodeId]._meta.title === "Positive Prompt") {
         workflow[nodeId].inputs.text = getPictionaryPrompt(prompt);
       }
