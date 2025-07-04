@@ -36,6 +36,11 @@ TOTAL_ROUNDS = 0
 DURATION = DEFAULT_DURATION
 FPS = DEFAULT_FPS
 
+# Add these global caches near the top of your file (after the constants)
+text_cache = {}
+image_cache = {}
+strokes_cache = {}
+
 def get_default_font(bold=False):
     """Find a default system font that's available. If bold=True, prefer bold fonts."""
     # Try common fonts available on different systems
@@ -151,12 +156,10 @@ def extract_black_strokes(image, threshold=80):
                 strokes.append(stroke)
     return strokes
 
-def create_drawing_animation(image, progress, strokes_cache=None, image_path=None):
+def create_drawing_animation(image, progress, strokes_cache=strokes_cache, image_path=None):
     """
     Animate black strokes being drawn from one end to the other, with all strokes finishing by the end of the drawing phase.
     """
-    if strokes_cache is None:
-        strokes_cache = {}
     cache_key = (image_path, image.size) if image_path else (None, image.size)
     if cache_key not in strokes_cache:
         strokes = extract_black_strokes(image)
@@ -263,6 +266,23 @@ def create_text_element(text, font_size=140):
         y += line_height
     return text_img
 
+def get_text_element(text, font_size=140):
+    key = (text, font_size)
+    if key not in text_cache:
+        text_cache[key] = create_text_element(text, font_size)
+    return text_cache[key]
+
+def get_resized_image(image_path):
+    if image_path not in image_cache:
+        img = Image.open(image_path).convert('RGBA')
+        img_width, img_height = img.size
+        ratio = VIDEO_WIDTH / img_width
+        new_width = int(img_width * ratio)
+        new_height = int(img_height * ratio)
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        image_cache[image_path] = img
+    return image_cache[image_path]
+
 def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, drawing_phase, frames_per_round, thinking_file, drawing_file, output_audio):
     """
     Create an audio track that alternates between thinking_file and drawing_file
@@ -288,7 +308,7 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r0_gen.wav")
                 subprocess.run(
-                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.05,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(gen)
@@ -319,7 +339,7 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
             if initial_loading > 0:
                 ana = os.path.join(temp_dir, f"r{i}_ana.wav")
                 subprocess.run(
-                    f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"',
+                    f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.05,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(ana)
@@ -335,7 +355,7 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r{i}_gen.wav")
                 subprocess.run(
-                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.05,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(gen)
@@ -405,7 +425,7 @@ def generate_frames(part_number=None):
                     if current_round == 0:
                         # For the first round, show the word immediately, no loading indicator
                         text = f"{round_data['prompt']}"
-                        text_img = create_text_element(text)
+                        text_img = get_text_element(text)
                         # Add a short delay before showing the 'Generating' loading indicator for the image
                         GENERATE_DELAY_FRAMES = int(frames_per_round * 0.18)
                         if frame_in_round < GENERATE_DELAY_FRAMES:
@@ -438,12 +458,7 @@ def generate_frames(part_number=None):
                             })
                             if 'image' in round_data and os.path.exists(round_data['image']):
                                 try:
-                                    round_img = Image.open(round_data['image']).convert('RGBA')
-                                    img_width, img_height = round_img.size
-                                    ratio = VIDEO_WIDTH / img_width
-                                    new_width = int(img_width * ratio)
-                                    new_height = int(img_height * ratio)
-                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    round_img = get_resized_image(round_data['image'])
                                     drawing_progress = min(1.0, max(0.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay - 3)) / (drawing_phase - 3)))
                                     animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
@@ -464,12 +479,7 @@ def generate_frames(part_number=None):
                             })
                             if 'image' in round_data and os.path.exists(round_data['image']):
                                 try:
-                                    round_img = Image.open(round_data['image']).convert('RGBA')
-                                    img_width, img_height = round_img.size
-                                    ratio = VIDEO_WIDTH / img_width
-                                    new_width = int(img_width * ratio)
-                                    new_height = int(img_height * ratio)
-                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    round_img = get_resized_image(round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
                                         'image': round_img,
@@ -491,7 +501,7 @@ def generate_frames(part_number=None):
                         # Show text after initial_loading
                         elif frame_in_round >= initial_loading and frame_in_round < initial_loading + text_phase - 3:
                             text = f"{round_data['prompt']}"
-                            text_img = create_text_element(text)
+                            text_img = get_text_element(text)
                             text_opacity = min(255, int((frame_in_round - initial_loading) / (text_phase * 0.2) * 255))
                             visible_elements.append({
                                 'type': 'text',
@@ -503,7 +513,7 @@ def generate_frames(part_number=None):
                         if frame_in_round >= initial_loading + text_phase - 3 and frame_in_round < initial_loading + text_phase + image_delay - 3:
                             # Ensure the word is visible above the loading indicator
                             text = f"{round_data['prompt']}"
-                            text_img = create_text_element(text)
+                            text_img = get_text_element(text)
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -521,7 +531,7 @@ def generate_frames(part_number=None):
                         if frame_in_round >= initial_loading + text_phase + image_delay - 3 and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase - 3:
                             # Ensure the word is visible above the image
                             text = f"{round_data['prompt']}"
-                            text_img = create_text_element(text)
+                            text_img = get_text_element(text)
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -530,12 +540,7 @@ def generate_frames(part_number=None):
                             })
                             if 'image' in round_data and os.path.exists(round_data['image']):
                                 try:
-                                    round_img = Image.open(round_data['image']).convert('RGBA')
-                                    img_width, img_height = round_img.size
-                                    ratio = VIDEO_WIDTH / img_width
-                                    new_width = int(img_width * ratio)
-                                    new_height = int(img_height * ratio)
-                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    round_img = get_resized_image(round_data['image'])
                                     drawing_progress = min(1.0, max(0.0, (frame_in_round - (initial_loading + text_phase + image_delay - 3)) / (drawing_phase - 3)))
                                     animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
@@ -551,7 +556,7 @@ def generate_frames(part_number=None):
                         if frame_in_round >= initial_loading + text_phase + image_delay + drawing_phase - 3 and frame_in_round < initial_loading + text_phase + image_delay + drawing_phase:
                             # Ensure the word is visible above the image
                             text = f"{round_data['prompt']}"
-                            text_img = create_text_element(text)
+                            text_img = get_text_element(text)
                             visible_elements.append({
                                 'type': 'text',
                                 'image': text_img,
@@ -560,12 +565,7 @@ def generate_frames(part_number=None):
                             })
                             if 'image' in round_data and os.path.exists(round_data['image']):
                                 try:
-                                    round_img = Image.open(round_data['image']).convert('RGBA')
-                                    img_width, img_height = round_img.size
-                                    ratio = VIDEO_WIDTH / img_width
-                                    new_width = int(img_width * ratio)
-                                    new_height = int(img_height * ratio)
-                                    round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                                    round_img = get_resized_image(round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
                                         'image': round_img,
@@ -577,7 +577,7 @@ def generate_frames(part_number=None):
                 else:
                     # For previous rounds, show both text and image
                     text = f"{round_data['prompt']}"
-                    text_img = create_text_element(text)
+                    text_img = get_text_element(text)
                     visible_elements.append({
                         'type': 'text',
                         'image': text_img,
@@ -587,14 +587,7 @@ def generate_frames(part_number=None):
                     
                     if 'image' in round_data and os.path.exists(round_data['image']):
                         try:
-                            round_img = Image.open(round_data['image']).convert('RGBA')
-                            img_width, img_height = round_img.size
-                            
-                            ratio = VIDEO_WIDTH / img_width
-                            new_width = int(img_width * ratio)
-                            new_height = int(img_height * ratio)
-                            
-                            round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                            round_img = get_resized_image(round_data['image'])
                             visible_elements.append({
                                 'type': 'image',
                                 'image': round_img,
