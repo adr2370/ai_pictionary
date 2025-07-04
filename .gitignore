@@ -6,3 +6,5 @@ LoRA/quickdraw_lora_training/
 LoRA/output/
 LoRA/logs/
 temp_frames/
+client_secrets.json
+token.pickle
