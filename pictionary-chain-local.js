@@ -514,7 +514,8 @@ async function getPlausibleWrongGuess(imagePath) {
         messages: [
           {
             role: "system",
-            content: `You are an AI playing Pictionary. Analyze the drawing and provide a plausible but deliberately incorrect guess—a word or short phrase that a human might reasonably guess, but is not the exact right answer. Do not ask questions or provide explanations; just give the guess as a single word or short phrase.`,
+            content: `You are an AI playing Pictionary. Analyze the drawing and provide a plausible but deliberately incorrect guess—a word or short phrase that a human might reasonably guess, but is not the exact right answer. Do not ask questions or provide explanations; just give the guess as a single word or short phrase. 
+**Do not answer "spider web" or anything similar.**`,
           },
           {
             role: "user",

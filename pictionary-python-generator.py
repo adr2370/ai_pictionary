@@ -279,23 +279,35 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
             # 1. Word only (no music)
             if GENERATE_DELAY_FRAMES > 0:
                 silence1 = os.path.join(temp_dir, f"r0_silence1.wav")
-                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {GENERATE_DELAY_FRAMES / fps} "{silence1}"')
+                subprocess.run(
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {GENERATE_DELAY_FRAMES / fps} "{silence1}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(silence1)
             # 2. Generating (thinking.flac)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r0_gen.wav")
-                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                subprocess.run(
+                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(gen)
             # 3. Drawing (drawing.mp3)
             if drawing_phase > 0:
                 draw = os.path.join(temp_dir, f"r0_draw.wav")
-                os.system(f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"')
+                subprocess.run(
+                    f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(draw)
             # 4. Reveal (rest, silence)
             reveal_frames = frames_per_round - (GENERATE_DELAY_FRAMES + image_delay + drawing_phase)
             if reveal_frames > 0:
                 silence2 = os.path.join(temp_dir, f"r0_silence2.wav")
-                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"')
+                subprocess.run(
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(silence2)
         else:
             # Round 1+: analyzing, word, generating, drawing, reveal
@@ -306,35 +318,53 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
             # 1. Analyzing (thinking.flac)
             if initial_loading > 0:
                 ana = os.path.join(temp_dir, f"r{i}_ana.wav")
-                os.system(f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"')
+                subprocess.run(
+                    f'ffmpeg -y -t {initial_loading / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={initial_loading / fps}" -acodec pcm_s16le "{ana}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(ana)
             # 2. Word only (silence)
             if text_phase > 0:
                 silence1 = os.path.join(temp_dir, f"r{i}_silence1.wav")
-                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {text_phase / fps} "{silence1}"')
+                subprocess.run(
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {text_phase / fps} "{silence1}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(silence1)
             # 3. Generating (thinking.flac)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r{i}_gen.wav")
-                os.system(f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"')
+                subprocess.run(
+                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.15,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(gen)
             # 4. Drawing (drawing.mp3)
             if drawing_phase > 0:
                 draw = os.path.join(temp_dir, f"r{i}_draw.wav")
-                os.system(f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"')
+                subprocess.run(
+                    f'ffmpeg -y -t {drawing_phase / fps} -i "{drawing_file}" -af "apad=pad_dur={drawing_phase / fps}" -acodec pcm_s16le "{draw}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(draw)
             # 5. Reveal (rest, silence)
             reveal_frames = frames_per_round - (initial_loading + text_phase + image_delay + drawing_phase)
             if reveal_frames > 0:
                 silence2 = os.path.join(temp_dir, f"r{i}_silence2.wav")
-                os.system(f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"')
+                subprocess.run(
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {reveal_frames / fps} "{silence2}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
                 segment_files.append(silence2)
     # Concatenate all segments
     concat_file = os.path.join(temp_dir, "concat.txt")
     with open(concat_file, "w") as f:
         for seg in segment_files:
             f.write(f"file '{seg}'\n")
-    os.system(f'ffmpeg -y -f concat -safe 0 -i "{concat_file}" -c copy "{output_audio}"')
+    subprocess.run(
+        f'ffmpeg -y -f concat -safe 0 -i "{concat_file}" -c copy "{output_audio}"',
+        shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     shutil.rmtree(temp_dir)
 
 def generate_frames(part_number=None):
