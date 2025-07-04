@@ -93,6 +93,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the YouTube upload step.')
     parser.add_argument('--count', type=int, default=1, help='Number of videos to create in a row (default: 1)')
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
+    parser.add_argument('--wait-minutes', type=int, default=30, help='Minutes to wait between uploads (default: 30)')
     args = parser.parse_args()
 
     try:
@@ -107,6 +108,14 @@ def main():
             else:
                 upload_to_youtube(video_path, part_number=part_number)
             print(f"All steps completed for Part {part_number}.")
+            
+            # Wait between uploads (except for the last one)
+            if i < args.count - 1:  # Don't wait after the last upload
+                wait_seconds = args.wait_minutes * 60
+                print(f"\nWaiting {args.wait_minutes} minutes before next upload to avoid throttling...")
+                print(f"Next upload will start at: {datetime.now().strftime('%H:%M:%S')}")
+                time.sleep(wait_seconds)
+                print(f"Resuming at: {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
