@@ -13,7 +13,11 @@ const { getPictionaryPrompt } = require("./promptTemplates");
 const COMFYUI_API_URL = "http://127.0.0.1:8188"; // Local ComfyUI server address
 const OPENAI_API_KEY =
   "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"; // Still need this for the guessing part
-const GAME_DIR = path.join(__dirname, "pictionary_game_" + Date.now());
+const GAMES_ROOT = path.join(__dirname, "games");
+if (!fs.existsSync(GAMES_ROOT)) {
+  fs.mkdirSync(GAMES_ROOT);
+}
+const GAME_DIR = path.join(GAMES_ROOT, "pictionary_game_" + Date.now());
 
 // List of starter words for the first round
 const STARTER_WORDS = [

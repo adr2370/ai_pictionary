@@ -8,7 +8,7 @@
  * @returns {string} - The formatted prompt for the image generation model
  */
 function getPictionaryPrompt(prompt) {
-  return `A minimalist vector-style line drawing of a ${prompt}, as if drawn using basic computer drawing software. Only black outlines on white background, no shading, no texture, extremely simple like a pictionary game. Use as few straight lines as possible, like a stick figure version.`;
+  return `(${prompt}:1.3), simple line drawing, minimalist sketch, clean black lines only, (white background:1.2), monochrome, black and white only`;
 }
 
 module.exports = {

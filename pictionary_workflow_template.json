@@ -1,7 +1,7 @@
 {
   "2": {
     "inputs": {
-      "text": "black and white sketch of a dog",
+      "text": "(porcupine:1.3), simple line drawing, minimalist sketch, clean black lines only, (white background:1.2), monochrome, black and white only",
       "clip": ["10", 1]
     },
     "class_type": "CLIPTextEncode",
@@ -22,9 +22,9 @@
   },
   "4": {
     "inputs": {
-      "seed": 753980058821875,
+      "seed": 813363408238173,
       "steps": 20,
-      "cfg": 7,
+      "cfg": 9,
       "sampler_name": "euler_ancestral",
       "scheduler": "normal",
       "denoise": 1,
@@ -69,7 +69,7 @@
   },
   "9": {
     "inputs": {
-      "text": "",
+      "text": "color, colored, shading, shadows, gradient, black fill, solid black areas, filled shapes, black patches, dark shading, heavy black sections, thick black areas, filled regions, messy lines, thick lines, detailed shading, watercolor, painting, realistic, photorealistic, blurry, low quality, artifacts, noise, complex background, cluttered, busy, ornate, decorative, textured background, gray background, colored background, yellow, orange, red, blue, green, purple, any color, colored beak, colored feet, solid fill, color fill, filled areas, dark fill, green fill, orange fill, yellow fill",
       "clip": ["10", 1]
     },
     "class_type": "CLIPTextEncode",
@@ -80,8 +80,8 @@
   "10": {
     "inputs": {
       "lora_name": "quickdraw_sketch.safetensors",
-      "strength_model": 1,
-      "strength_clip": 1,
+      "strength_model": 1.0000000000000002,
+      "strength_clip": 1.0000000000000002,
       "model": ["8", 0],
       "clip": ["8", 1]
     },
