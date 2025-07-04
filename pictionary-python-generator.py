@@ -884,18 +884,14 @@ def main():
     
     args = parser.parse_args()
     
-    # Create videos directory if it doesn't exist
-    videos_dir = "videos"
-    os.makedirs(videos_dir, exist_ok=True)
-    
     # Generate a unique filename with timestamp if not specified
     if args.output is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         output_filename = f"pictionary_chain_{timestamp}.mp4"
-        output_path = os.path.join(videos_dir, output_filename)
+        output_path = os.path.join(args.game_dir, output_filename)
     else:
-        # If output was specified, still put it in the videos directory
-        output_path = os.path.join(videos_dir, args.output)
+        # If output was specified, put it in the game directory
+        output_path = os.path.join(args.game_dir, args.output)
     
     # Update global variables based on arguments
     global DURATION, FPS, all_rounds, TOTAL_ROUNDS, FONT_PATH
