@@ -16,8 +16,8 @@ import json
 import time
 
 # Constants
-VIDEO_WIDTH = 1080  # TikTok vertical video width
-VIDEO_HEIGHT = 1920  # TikTok vertical video height
+VIDEO_WIDTH = 1080  # Vertical video width
+VIDEO_HEIGHT = 1920  # Vertical video height
 BACKGROUND_COLOR = (255, 255, 255)  # White
 TEXT_COLOR = (33, 33, 33)  # Dark gray, almost black
 DEFAULT_DURATION = 3  # Default duration for each card (seconds)
@@ -700,75 +700,30 @@ def generate_frames_parallel(config, num_processes=None):
                     
             except Exception as e:
                 print(f"Error processing frame {frame_num}: {e}")
-    
-    print(f"Frame generation completed in {time.time() - start_time:.2f} seconds")
 
 def create_video(output_file="pictionary_chain.mp4", fps=30, custom_audio=None):
     """Combine frames into a video using ffmpeg"""
     print("Creating video from frames...")
     
-    # Create a temporary file list for ffmpeg
-    frame_list_path = "temp_frames/frames.txt"
-    with open(frame_list_path, "w") as f:
-        # Get all frame files and sort them numerically
-        frame_files = sorted([file for file in os.listdir("temp_frames") if file.startswith("frame_") and file.endswith(".png")])
-        for frame_file in frame_files:
-            f.write(f"file '{frame_file}'\n")
+    # Use the image2 demuxer approach (simpler and more reliable)
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(fps),
+        "-i", "temp_frames/frame_%05d.png",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-crf", "23", 
+        "-preset", "medium",
+        "-loglevel", "error",  # Reduce log output
+        output_file
+    ]
     
     try:
-        # Primary approach with concat demuxer
-        print("Creating video using concat demuxer...")
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-r", str(fps),
-            "-f", "concat",
-            "-safe", "0",
-            "-i", frame_list_path,
-            "-vsync", "vfr",
-            "-avoid_negative_ts", "make_zero",
-            "-c:v", "libx264", 
-            "-pix_fmt", "yuv420p",
-            "-crf", "23",
-            "-preset", "medium",
-            output_file
-        ]
-        
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, cwd="temp_frames")
-        
-        if result.returncode != 0:
-            print(f"Warning: First approach failed with error: {result.stderr}")
-            print("Trying alternative approach...")
-            
-            # Alternative approach
-            alt_ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-framerate", str(fps),
-                "-i", "temp_frames/frame_%05d.png",
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-crf", "23", 
-                "-preset", "medium",
-                output_file
-            ]
-            subprocess.run(alt_ffmpeg_cmd)
-        
+        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"Video created: {output_file}")
-        
-    except Exception as e:
+    except subprocess.CalledProcessError as e:
         print(f"Error creating video: {e}")
-        # Fallback approach
-        alt_ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-framerate", str(fps),
-            "-i", "temp_frames/frame_%05d.png",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-crf", "23", 
-            "-preset", "medium",
-            output_file
-        ]
-        subprocess.run(alt_ffmpeg_cmd)
-        print(f"Video created: {output_file}")
+        raise
     
     # Add custom audio if present
     if custom_audio and os.path.exists(custom_audio):
@@ -967,7 +922,7 @@ def read_game_log(game_dir):
 def main():
     """Main function to orchestrate the parallel video generation"""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Generate a TikTok video from Pictionary Chain Game images (Parallel Version)')
+    parser = argparse.ArgumentParser(description='Generate a video from Pictionary Chain Game images (Parallel Version)')
     parser.add_argument('--game-dir', '-g', type=str, required=True,
                         help='Directory containing the game log files')
     parser.add_argument('--duration', '-d', type=float, default=DEFAULT_DURATION,
@@ -1007,7 +962,7 @@ def main():
         else:
             print("Using PIL's default font")
     
-    print("Starting Parallel Pictionary Chain TikTok Generator")
+    print("Starting Parallel Pictionary Chain Generator")
     
     # Read game log data
     all_rounds = read_game_log(args.game_dir)
