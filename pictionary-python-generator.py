@@ -304,11 +304,11 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(silence1)
-            # 2. Generating (thinking.flac)
+            # 2. Generating (silence)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r0_gen.wav")
                 subprocess.run(
-                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.05,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {image_delay / fps} "{gen}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(gen)
@@ -351,11 +351,11 @@ def create_audio_track(fps, rounds, initial_loading, text_phase, image_delay, dr
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(silence1)
-            # 3. Generating (thinking.flac)
+            # 3. Generating (silence)
             if image_delay > 0:
                 gen = os.path.join(temp_dir, f"r{i}_gen.wav")
                 subprocess.run(
-                    f'ffmpeg -y -t {image_delay / fps} -i "{thinking_file}" -af "volume=0.05,apad=pad_dur={image_delay / fps}" -acodec pcm_s16le "{gen}"',
+                    f'ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t {image_delay / fps} "{gen}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
                 segment_files.append(gen)
