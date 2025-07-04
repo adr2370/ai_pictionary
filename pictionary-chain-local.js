@@ -740,17 +740,6 @@ runGame(10, customStartWord)
   .then((gameDir) => {
     if (gameDir) {
       console.log("\nGame files are in:", gameDir);
-
-      // Open the HTML file in default browser if we're on Windows
-      if (process.platform === "win32") {
-        exec(`start ${path.join(gameDir, "index.html")}`);
-      } else if (process.platform === "darwin") {
-        // macOS
-        exec(`open ${path.join(gameDir, "index.html")}`);
-      } else {
-        // Linux
-        exec(`xdg-open ${path.join(gameDir, "index.html")}`);
-      }
     }
   })
   .catch((error) => {

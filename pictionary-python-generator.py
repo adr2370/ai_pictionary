@@ -726,7 +726,7 @@ def create_video(output_file="pictionary_chain.mp4", custom_audio=None):
             "-shortest",
             output_file
         ]
-        subprocess.run(ffmpeg_audio_cmd)
+        subprocess.run(ffmpeg_audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"Video with audio created: {output_file}")
         # Remove the temp video file
         if os.path.exists(temp_video):
