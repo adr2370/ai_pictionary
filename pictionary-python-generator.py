@@ -250,11 +250,13 @@ def extract_black_strokes(image, threshold=80):
                 strokes.append(stroke)
     return strokes
 
-def create_drawing_animation(image, progress, strokes_cache={}):
+def create_drawing_animation(image, progress, strokes_cache=None, image_path=None):
     """
     Animate black strokes being drawn from one end to the other, with all strokes finishing by the end of the drawing phase.
     """
-    cache_key = (id(image), image.size)
+    if strokes_cache is None:
+        strokes_cache = {}
+    cache_key = (image_path, image.size) if image_path else (None, image.size)
     if cache_key not in strokes_cache:
         strokes = extract_black_strokes(image)
         strokes.sort(key=len, reverse=True)  # Sort by number of points, longest first
@@ -550,7 +552,7 @@ def generate_frames(part_number=None):
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
                                     drawing_progress = min(1.0, max(0.0, (frame_in_round - (GENERATE_DELAY_FRAMES + image_delay)) / drawing_phase))
-                                    animated_img = create_drawing_animation(round_img, drawing_progress)
+                                    animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
                                         'image': animated_img,
@@ -644,7 +646,7 @@ def generate_frames(part_number=None):
                                     new_height = int(img_height * ratio)
                                     round_img = round_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
                                     drawing_progress = min(1.0, max(0.0, (frame_in_round - (initial_loading + text_phase + image_delay)) / drawing_phase))
-                                    animated_img = create_drawing_animation(round_img, drawing_progress)
+                                    animated_img = create_drawing_animation(round_img, drawing_progress, image_path=round_data['image'])
                                     visible_elements.append({
                                         'type': 'image',
                                         'image': animated_img,
