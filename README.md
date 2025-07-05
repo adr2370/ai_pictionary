@@ -150,7 +150,7 @@ python main.py [options]
 - `--dry-run`: Run everything except YouTube upload (for testing)
 - `--count N`: Number of videos to create in a row (default: 1)
 - `--start-part N`: Part number to start on (default: 1)
-- `--wait-minutes N`: Minutes to wait between uploads (default: 60)
+- `--wait-minutes N`: Minutes to wait between uploads and retries (default: 60)
 - `--max-retries N`: Maximum retries for upload limit errors (default: 50)
 - `--chain-games`: Use last guess from each game as starting word for next game
 
@@ -189,6 +189,9 @@ python main.py --count 3 --chain-games
 
 # Run games in chain mode with custom settings
 python main.py --count 5 --chain-games --wait-minutes 30 --start-part 1
+
+# Use shorter wait times for faster retries (useful for testing)
+python main.py --count 2 --wait-minutes 5 --dry-run
 ```
 
 **Chain Mode Benefits**:

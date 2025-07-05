@@ -5,7 +5,7 @@ import argparse
 import glob
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import pickle
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -92,30 +92,36 @@ def generate_video(game_dir, part_number=None):
     return output_path
 
 
-def upload_to_youtube(video_path, part_number=None, max_retries=50):
+def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes=60):
     print(f"[4/4] Uploading video to YouTube (Part {part_number})...")
     # Check for client_secrets.json
     if not os.path.exists('client_secrets.json'):
         raise FileNotFoundError("client_secrets.json not found. Please download your OAuth 2.0 credentials and place them in the project directory.")
     
     SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-    creds = None
-    if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
     
-    youtube = build('youtube', 'v3', credentials=creds)
+    def get_youtube_client():
+        """Create a fresh YouTube API client with valid credentials."""
+        creds = None
+        if os.path.exists('token.pickle'):
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file('client_secrets.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+        
+        return build('youtube', 'v3', credentials=creds)
     
     for attempt in range(max_retries):
         try:
+            # Create a fresh YouTube client for each attempt to avoid stale connections
+            youtube = get_youtube_client()
+            
             request = youtube.videos().insert(
                 part="snippet,status",
                 body={
@@ -141,10 +147,10 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50):
             
             if reason == 'uploadLimitExceeded':
                 if attempt < max_retries - 1:  # Not the last attempt
-                    wait_time = 3600  # 1 hour in seconds
-                    print(f"Upload limit exceeded. Waiting {wait_time//60} minutes before retry {attempt + 2}/{max_retries}...")
-                    next_retry_time = datetime.now().timestamp() + wait_time
-                    next_retry_datetime = datetime.fromtimestamp(next_retry_time)
+                    wait_time = wait_minutes * 60  # Convert minutes to seconds
+                    print(f"Upload limit exceeded. Waiting {wait_minutes} minutes before retry {attempt + 2}/{max_retries}...")
+                    current_time = datetime.now()
+                    next_retry_datetime = current_time + timedelta(seconds=wait_time)
                     print(f"Next retry will be at: {next_retry_datetime.strftime('%H:%M:%S')}")
                     time.sleep(wait_time)
                     print(f"Retrying upload at: {datetime.now().strftime('%H:%M:%S')}")
@@ -167,7 +173,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the YouTube upload step.')
     parser.add_argument('--count', type=int, default=1, help='Number of videos to create in a row (default: 1)')
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
-    parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads (default: 60)')
+    parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads and retries (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
     parser.add_argument('--chain-games', action='store_true', help='Use the last guess from each game as the starting word for the next game (creates a continuous chain)')
     args = parser.parse_args()
@@ -198,14 +204,16 @@ def main():
             if args.dry_run:
                 print("[DRY RUN] Skipping YouTube upload.")
             else:
-                upload_to_youtube(video_path, part_number=part_number, max_retries=args.max_retries)
+                upload_to_youtube(video_path, part_number=part_number, max_retries=args.max_retries, wait_minutes=args.wait_minutes)
             print(f"All steps completed for Part {part_number}.")
             
             # Wait between uploads (except for the last one)
             if i < args.count - 1:  # Don't wait after the last upload
                 wait_seconds = args.wait_minutes * 60
+                current_time = datetime.now()
+                next_upload_time = current_time + timedelta(seconds=wait_seconds)
                 print(f"\nWaiting {args.wait_minutes} minutes before next upload to avoid throttling...")
-                print(f"Next upload will start at: {datetime.now().strftime('%H:%M:%S')}")
+                print(f"Next upload will start at: {next_upload_time.strftime('%H:%M:%S')}")
                 time.sleep(wait_seconds)
                 print(f"Resuming at: {datetime.now().strftime('%H:%M:%S')}")
     except Exception as e:
