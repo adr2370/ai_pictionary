@@ -5,6 +5,7 @@ import argparse
 import glob
 import time
 import re
+import json
 from datetime import datetime, timedelta
 import pickle
 from googleapiclient.discovery import build
@@ -12,6 +13,14 @@ from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.errors import HttpError
+
+# Import TikTok uploader
+try:
+    from tiktok_uploader import upload_to_tiktok
+    TIKTOK_AVAILABLE = True
+except ImportError:
+    print("Warning: TikTok uploader not available. Install tiktok_uploader.py to enable TikTok uploads.")
+    TIKTOK_AVAILABLE = False
 
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
@@ -93,7 +102,7 @@ def generate_video(game_dir, part_number=None):
 
 
 def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes=60):
-    print(f"[4/4] Uploading video to YouTube (Part {part_number})...")
+    print(f"[4a/5] Uploading video to YouTube (Part {part_number})...")
     # Check for client_secrets.json
     if not os.path.exists('client_secrets.json'):
         raise FileNotFoundError("client_secrets.json not found. Please download your OAuth 2.0 credentials and place them in the project directory.")
@@ -138,8 +147,8 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes
                 media_body=MediaFileUpload(video_path)
             )
             response = request.execute()
-            print(f"Video uploaded: https://youtube.com/shorts/{response['id']}")
-            return  # Success, exit the retry loop
+            print(f"Video uploaded to YouTube: https://youtube.com/shorts/{response['id']}")
+            return response  # Success, exit the retry loop
             
         except HttpError as e:
             error_details = e.error_details[0] if e.error_details else {}
@@ -168,15 +177,102 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes
             raise
 
 
+def upload_to_tiktok_with_retry(video_path, client_key, client_secret, part_number=None, max_retries=50, wait_minutes=60):
+    """Upload video to TikTok with retry logic."""
+    print(f"[4b/5] Uploading video to TikTok (Part {part_number})...")
+    
+    if not TIKTOK_AVAILABLE:
+        print("TikTok uploader not available. Skipping TikTok upload.")
+        return None
+    
+    if not client_key or not client_secret:
+        print("TikTok credentials not provided. Skipping TikTok upload.")
+        return None
+    
+    # Generate title for TikTok
+    title = f"The World's Longest Game of Pictionary Part {part_number} #AI #Pictionary #Comedy #ArtificialIntelligence #GameShow" if part_number else "AI Pictionary Chain Game #AI #Pictionary #Comedy"
+    
+    for attempt in range(max_retries):
+        try:
+            result = upload_to_tiktok(
+                video_path=video_path,
+                client_key=client_key,
+                client_secret=client_secret,
+                title=title,
+                privacy_level="PUBLIC_TO_EVERYONE",  # Change to SELF_ONLY for testing
+                max_retries=1,  # Don't double-retry inside the function
+                wait_minutes=0
+            )
+            print("Video uploaded to TikTok successfully!")
+            return result
+            
+        except Exception as e:
+            print(f"TikTok upload failed: {e}")
+            if attempt < max_retries - 1:
+                wait_time = wait_minutes * 60
+                print(f"Waiting {wait_minutes} minutes before retry {attempt + 2}/{max_retries}...")
+                current_time = datetime.now()
+                next_retry_datetime = current_time + timedelta(seconds=wait_time)
+                print(f"Next retry will be at: {next_retry_datetime.strftime('%H:%M:%S')}")
+                time.sleep(wait_time)
+                print(f"Retrying TikTok upload at: {datetime.now().strftime('%H:%M:%S')}")
+                continue
+            else:
+                print(f"TikTok upload failed after {max_retries} attempts. Continuing without TikTok upload.")
+                return None
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Orchestrate AI Pictionary game, video generation, and YouTube upload.")
-    parser.add_argument('--dry-run', action='store_true', help='Run everything except the YouTube upload step.')
+    parser = argparse.ArgumentParser(description="Orchestrate AI Pictionary game, video generation, and social media uploads.")
+    parser.add_argument('--dry-run', action='store_true', help='Run everything except the upload steps.')
     parser.add_argument('--count', type=int, default=1, help='Number of videos to create in a row (default: 1)')
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
     parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads and retries (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
     parser.add_argument('--chain-games', action='store_true', help='Use the last guess from each game as the starting word for the next game (creates a continuous chain)')
+    
+    # YouTube options
+    parser.add_argument('--skip-youtube', action='store_true', help='Skip YouTube upload')
+    
+    # TikTok options
+    parser.add_argument('--skip-tiktok', action='store_true', help='Skip TikTok upload')
+    parser.add_argument('--tiktok-config', default='tiktok_config.json', help='TikTok configuration file (default: tiktok_config.json)')
+    parser.add_argument('--tiktok-client-key', help='TikTok app client key (overrides config file)')
+    parser.add_argument('--tiktok-client-secret', help='TikTok app client secret (overrides config file)')
+    parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], 
+                       help='TikTok video privacy level (overrides config file)')
+    
     args = parser.parse_args()
+
+    # Load TikTok configuration
+    tiktok_config = {}
+    if os.path.exists(args.tiktok_config):
+        try:
+            with open(args.tiktok_config, 'r') as f:
+                config_data = json.load(f)
+            tiktok_config = config_data.get('tiktok', {})
+            print(f"TikTok configuration loaded from {args.tiktok_config}")
+        except Exception as e:
+            print(f"Warning: Could not load TikTok config: {e}")
+
+    # Get TikTok credentials from args, config file, or environment (in order of preference)
+    tiktok_client_key = (args.tiktok_client_key or 
+                        tiktok_config.get('client_key') or 
+                        os.getenv('TIKTOK_CLIENT_KEY'))
+    tiktok_client_secret = (args.tiktok_client_secret or 
+                           tiktok_config.get('client_secret') or 
+                           os.getenv('TIKTOK_CLIENT_SECRET'))
+    tiktok_privacy_level = (args.tiktok_privacy or 
+                           tiktok_config.get('default_privacy', 'SELF_ONLY'))
+    
+    if not args.skip_tiktok and TIKTOK_AVAILABLE:
+        if not tiktok_client_key or not tiktok_client_secret:
+            print("Warning: TikTok credentials not found. TikTok uploads will be skipped.")
+            print("Configure credentials in one of these ways:")
+            print(f"  1. Create {args.tiktok_config} with client_key and client_secret")
+            print("  2. Use --tiktok-client-key and --tiktok-client-secret arguments")
+            print("  3. Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET environment variables")
+            args.skip_tiktok = True
 
     try:
         previous_game_dir = None
@@ -201,10 +297,64 @@ def main():
             game_dir = find_latest_game_dir()
             previous_game_dir = game_dir  # Store for next iteration
             video_path = generate_video(game_dir, part_number=part_number)
+            
             if args.dry_run:
-                print("[DRY RUN] Skipping YouTube upload.")
+                print("[DRY RUN] Skipping all uploads.")
             else:
-                upload_to_youtube(video_path, part_number=part_number, max_retries=args.max_retries, wait_minutes=args.wait_minutes)
+                # Track upload results
+                youtube_result = None
+                tiktok_result = None
+                
+                # Upload to YouTube
+                if not args.skip_youtube:
+                    try:
+                        youtube_result = upload_to_youtube(
+                            video_path, 
+                            part_number=part_number, 
+                            max_retries=args.max_retries, 
+                            wait_minutes=args.wait_minutes
+                        )
+                    except Exception as e:
+                        print(f"YouTube upload failed: {e}")
+                
+                # Upload to TikTok
+                if not args.skip_tiktok and TIKTOK_AVAILABLE and tiktok_client_key and tiktok_client_secret:
+                    try:
+                        # Generate title from config template if available
+                        title_template = tiktok_config.get('default_title_template', 
+                                                         'The World\'s Longest Game of Pictionary Part {part} #{hashtags}')
+                        hashtags = ' '.join(f'#{tag}' for tag in tiktok_config.get('hashtags', ['AI', 'Pictionary', 'Comedy'])[:3])
+                        title = title_template.replace('{part}', str(part_number)).replace('{hashtags}', hashtags)
+                        
+                        tiktok_result = upload_to_tiktok(
+                            video_path=video_path,
+                            client_key=tiktok_client_key,
+                            client_secret=tiktok_client_secret,
+                            title=title,
+                            privacy_level=tiktok_privacy_level,
+                            config_file=args.tiktok_config
+                        )
+                        print("TikTok upload completed successfully!")
+                        
+                    except Exception as e:
+                        print(f"TikTok upload failed: {e}")
+                
+                # Summary
+                print(f"\n=== Upload Summary for Part {part_number} ===")
+                if youtube_result:
+                    print(f"✓ YouTube: https://youtube.com/shorts/{youtube_result['id']}")
+                else:
+                    print("✗ YouTube: Upload failed or skipped")
+                
+                if tiktok_result:
+                    post_ids = tiktok_result.get('data', {}).get('publicaly_available_post_id', [])
+                    if post_ids:
+                        print(f"✓ TikTok: Post ID {post_ids[0]}")
+                    else:
+                        print("✓ TikTok: Upload successful (processing)")
+                else:
+                    print("✗ TikTok: Upload failed or skipped")
+            
             print(f"All steps completed for Part {part_number}.")
             
             # Wait between uploads (except for the last one)
@@ -216,9 +366,11 @@ def main():
                 print(f"Next upload will start at: {next_upload_time.strftime('%H:%M:%S')}")
                 time.sleep(wait_seconds)
                 print(f"Resuming at: {datetime.now().strftime('%H:%M:%S')}")
+                
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
 
+
 if __name__ == "__main__":
-    main() 
+    main()
