@@ -9,3 +9,5 @@ temp_frames/
 client_secrets.json
 token.pickle
 profile_picture.png
+kohya_ss/
+sd-scripts/
