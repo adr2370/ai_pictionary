@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TikTok Video Upload Demo</title>
+    <title>Longest Game of Pictionary</title>
     <style>
       * {
         margin: 0;
@@ -391,8 +391,8 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>🎵 TikTok Video Upload Demo</h1>
-        <p>Simple demo of authenticating with TikTok and uploading a video</p>
+        <h1>🎵 Longest Game of Pictionary</h1>
+        <p>Automated video sharing for generated Pictionary games</p>
       </div>
 
       <!-- Step Indicator -->
@@ -514,10 +514,6 @@
         <div class="progress-bar hidden" id="progressBar">
           <div class="progress-fill" id="progressFill"></div>
         </div>
-
-        <div class="log-container hidden" id="uploadLog">
-          <div class="log-entry log-info">Ready to upload video...</div>
-        </div>
       </div>
 
       <!-- Results Card -->
@@ -531,9 +527,7 @@
           <!-- Results will be populated here -->
         </div>
 
-        <button class="btn btn-primary" onclick="resetDemo()">
-          Start New Demo
-        </button>
+        <button class="btn btn-primary" onclick="resetDemo()">Start New</button>
       </div>
     </div>
 
@@ -645,12 +639,7 @@
 
         // Show progress
         document.getElementById("progressBar").classList.remove("hidden");
-        document.getElementById("uploadLog").classList.remove("hidden");
         document.getElementById("uploadBtn").disabled = true;
-
-        addLogEntry("Starting video upload...", "info");
-        addLogEntry(`Title: ${title}`, "info");
-        addLogEntry(`Privacy: ${privacy}`, "info");
 
         // Simulate upload progress
         let progress = 0;
@@ -660,14 +649,7 @@
 
           document.getElementById("progressFill").style.width = progress + "%";
 
-          if (progress < 30) {
-            addLogEntry("Initializing upload...", "info");
-          } else if (progress < 60) {
-            addLogEntry("Uploading video data...", "info");
-          } else if (progress < 90) {
-            addLogEntry("Processing video...", "info");
-          } else if (progress >= 100) {
-            addLogEntry("Upload completed successfully!", "success");
+          if (progress >= 100) {
             document.getElementById("uploadStatus").className =
               "status-indicator status-success";
             clearInterval(progressInterval);
@@ -691,7 +673,7 @@
           <h3>Upload Details</h3>
           <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <p><strong>Video Title:</strong> ${
-              document.getElementById("videoTitle").value || "Demo Video"
+              document.getElementById("videoTitle").value || "Untitled Video"
             }</p>
             <p><strong>Privacy Level:</strong> ${
               document.getElementById("privacyLevel").value
@@ -735,13 +717,10 @@
         // Reset logs
         document.getElementById("authLog").innerHTML =
           '<div class="log-entry log-info">Ready to connect to TikTok...</div>';
-        document.getElementById("uploadLog").innerHTML =
-          '<div class="log-entry log-info">Ready to upload video...</div>';
 
         // Hide elements
         document.getElementById("authLog").classList.add("hidden");
         document.getElementById("progressBar").classList.add("hidden");
-        document.getElementById("uploadLog").classList.add("hidden");
 
         // Reset progress
         document.getElementById("progressFill").style.width = "0%";
@@ -809,7 +788,24 @@
 
       // Initialize demo
       document.addEventListener("DOMContentLoaded", () => {
-        addLogEntry('Demo ready! Click "Connect to TikTok" to start.', "info");
+        // Check for TikTok OAuth code in URL
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get("code");
+        if (code) {
+          // Store code for later use (e.g., exchange for access token)
+          window.tiktokAuthCode = code;
+          authTokens = { code };
+          addLogEntry(
+            "Authentication successful! Ready to upload your video.",
+            "success"
+          );
+          updateStep(2); // Go to upload video step
+        } else {
+          addLogEntry(
+            "Demo ready! Click 'Connect to TikTok' to start.",
+            "info"
+          );
+        }
       });
     </script>
   </body>
