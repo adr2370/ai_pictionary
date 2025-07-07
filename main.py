@@ -536,8 +536,8 @@ def main():
                     
                     # Create row for this video
                     row = {
-                        'Labels': '',
-                        'Text': "This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
+                        'Labels': f'Part {part_number}',
+                        'Text': f"The World's Longest Game of Pictionary Part {part_number}. This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
                         'Year': video_time.year,
                         'Month (1 to 12)': video_time.month,
                         'Date': video_time.day,
