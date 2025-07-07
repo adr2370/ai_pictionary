@@ -22,13 +22,13 @@ except ImportError:
     print("Warning: TikTok uploader not available. Install tiktok_uploader.py to enable TikTok uploads.")
     TIKTOK_AVAILABLE = False
 
-# Import Dropbox uploader
+# Import GitHub uploader
 try:
-    import dropbox
-    DROPBOX_AVAILABLE = True
+    import requests
+    GITHUB_AVAILABLE = True
 except ImportError:
-    print("Warning: Dropbox uploader not available. Install dropbox to enable Dropbox uploads.")
-    DROPBOX_AVAILABLE = False
+    print("Warning: requests not available. Install requests to enable GitHub uploads.")
+    GITHUB_AVAILABLE = False
 
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
@@ -99,9 +99,9 @@ def generate_video(game_dir, part_number=None):
     videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
     os.makedirs(videos_dir, exist_ok=True)
     
-    # Generate filename like "The World's Longest Game of Pictionary Part 1.mp4", etc.
+    # Generate filename like "the_worlds_longest_game_of_pictionary_part_1.mp4", etc.
     if part_number:
-        output_name = f"The World's Longest Game of Pictionary Part {part_number}.mp4"
+        output_name = f"the_worlds_longest_game_of_pictionary_part_{part_number}.mp4"
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_name = f"pictionary_chain_{timestamp}.mp4"
@@ -205,77 +205,6 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes
             raise
 
 
-def get_dropbox_client():
-    """Create a Dropbox client with valid access token."""
-    if not DROPBOX_AVAILABLE:
-        raise ImportError("Dropbox API not available")
-    
-    # Get Dropbox access token from environment or file
-    access_token = os.getenv('DROPBOX_ACCESS_TOKEN')
-    if not access_token:
-        if os.path.exists('dropbox_token.txt'):
-            with open('dropbox_token.txt', 'r') as f:
-                access_token = f.read().strip()
-        else:
-            raise FileNotFoundError(
-                "Dropbox access token not found. Please set DROPBOX_ACCESS_TOKEN environment variable "
-                "or create dropbox_token.txt with your access token."
-            )
-    
-    return dropbox.Dropbox(access_token)
-
-
-def upload_to_dropbox(video_path, part_number=None):
-    """Upload video to Dropbox and create a shared link."""
-    print(f"[4c/5] Uploading video to Dropbox (Part {part_number})...")
-    
-    if not DROPBOX_AVAILABLE:
-        print("Dropbox uploader not available. Skipping Dropbox upload.")
-        return None
-    
-    try:
-        # Initialize Dropbox client
-        dbx = get_dropbox_client()
-        
-        video_name = os.path.basename(video_path)
-        dropbox_path = f"/AI Pictionary Videos/{video_name}"
-        
-        # Upload the file (will overwrite if it exists)
-        with open(video_path, 'rb') as f:
-            dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
-        print(f"📤 Uploaded: {video_name}")
-        
-        # Create a shared link
-        shared_link = dbx.sharing_create_shared_link(dropbox_path)
-        
-        # Convert to direct download link (replace ?dl=0 with ?dl=1)
-        direct_download_url = shared_link.url.replace('?dl=0', '?dl=1')
-        
-        # If the URL doesn't have ?dl=0, add ?dl=1
-        if '?dl=' not in direct_download_url:
-            direct_download_url += '?dl=1'
-        
-        # Get file size
-        metadata = dbx.files_get_metadata(dropbox_path)
-        size_mb = round(metadata.size / (1024 * 1024), 1)
-        
-        result = {
-            'id': metadata.id,
-            'name': video_name,
-            'view_url': shared_link.url,
-            'download_url': direct_download_url,
-            'size_mb': size_mb
-        }
-        
-        print(f"✅ Dropbox URL: {result['view_url']}")
-        print(f"✅ Download URL: {result['download_url']}")
-        return result
-        
-    except Exception as e:
-        print(f"Dropbox upload failed: {e}")
-        return None
-
-
 def upload_to_tiktok_with_retry(video_path, client_key, client_secret, part_number=None, max_retries=50, wait_minutes=60):
     """Upload video to TikTok with retry logic."""
     print(f"[4b/5] Uploading video to TikTok (Part {part_number})...")
@@ -321,6 +250,85 @@ def upload_to_tiktok_with_retry(video_path, client_key, client_secret, part_numb
                 return None
 
 
+def get_github_config():
+    if not os.path.exists('github_config.json'):
+        raise FileNotFoundError("github_config.json not found. Please create it with your GitHub token and repo.")
+    with open('github_config.json', 'r') as f:
+        config = json.load(f)
+    token = config.get('token')
+    repo = config.get('repo')
+    if not token or not repo:
+        raise ValueError("github_config.json must contain 'token' and 'repo'.")
+    return token, repo
+
+
+def upload_to_github_release(video_path, part_number=None):
+    """Upload a video to GitHub Releases and return the direct .mp4 URL."""
+    print(f"[4c/5] Uploading video to GitHub Releases (Part {part_number})...")
+    if not GITHUB_AVAILABLE:
+        print("GitHub uploader not available. Skipping GitHub upload.")
+        return None
+    try:
+        token, repo = get_github_config()
+        video_name = os.path.basename(video_path)
+        # Use a tag for this batch (e.g., pictionary-videos)
+        tag = "pictionary-videos"
+        release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        headers = {
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        # Check if release exists
+        r = requests.get(release_url, headers=headers)
+        if r.status_code == 404:
+            # Create release
+            create_url = f"https://api.github.com/repos/{repo}/releases"
+            data = {
+                'tag_name': tag,
+                'name': 'AI Pictionary Videos',
+                'body': 'Batch upload of AI Pictionary videos',
+                'draft': False,
+                'prerelease': False
+            }
+            r = requests.post(create_url, headers=headers, json=data)
+            r.raise_for_status()
+            release = r.json()
+        else:
+            release = r.json()
+        upload_url = release['upload_url'].split('{')[0]
+        # Check if asset already exists
+        assets_url = release['assets_url']
+        assets = requests.get(assets_url, headers=headers).json()
+        for asset in assets:
+            if asset['name'] == video_name:
+                print(f"✅ Video already exists in release: {video_name}")
+                return {
+                    'name': video_name,
+                    'download_url': asset['browser_download_url']
+                }
+        # Upload asset
+        with open(video_path, 'rb') as f:
+            upload_headers = headers.copy()
+            upload_headers['Content-Type'] = 'video/mp4'
+            params = {'name': video_name}
+            upload_resp = requests.post(
+                upload_url,
+                headers=upload_headers,
+                params=params,
+                data=f
+            )
+        upload_resp.raise_for_status()
+        asset = upload_resp.json()
+        print(f"✅ Uploaded to GitHub Releases: {asset['browser_download_url']}")
+        return {
+            'name': video_name,
+            'download_url': asset['browser_download_url']
+        }
+    except Exception as e:
+        print(f"GitHub upload failed: {e}")
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Orchestrate AI Pictionary game, video generation, and social media uploads.")
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the upload steps.')
@@ -340,10 +348,6 @@ def main():
     parser.add_argument('--tiktok-client-secret', help='TikTok app client secret (overrides config file)')
     parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], 
                        help='TikTok video privacy level (overrides config file)')
-    
-    # Dropbox options
-    parser.add_argument('--upload-dropbox', action='store_true', default=True, help='Upload to Dropbox (enabled by default)')
-    parser.add_argument('--no-dropbox', action='store_true', help='Disable Dropbox upload')
     
     # CSV scheduling options
     parser.add_argument('--hours-ahead', type=int, default=3, help='Hours ahead of now to schedule the first video (default: 3)')
@@ -411,7 +415,7 @@ def main():
                 # Track upload results
                 youtube_result = None
                 tiktok_result = None
-                dropbox_result = None
+                github_result = None
                 
                 # Upload to YouTube (only if explicitly requested)
                 if args.upload_youtube:
@@ -451,56 +455,24 @@ def main():
                 else:
                     print("TikTok upload skipped (use --upload-tiktok to enable)")
                 
-                # Upload to Dropbox (enabled by default, unless --no-dropbox is used)
-                if args.upload_dropbox and not args.no_dropbox:
-                    try:
-                        dropbox_result = upload_to_dropbox(video_path, part_number=part_number)
-                    except Exception as e:
-                        print(f"Dropbox upload failed: {e}")
-                else:
-                    print("Dropbox upload skipped (use --no-dropbox to disable)")
+                # Upload to GitHub Releases (enabled by default)
+                try:
+                    github_result = upload_to_github_release(video_path, part_number=part_number)
+                except Exception as e:
+                    print(f"GitHub upload failed: {e}")
+                    github_result = None
                 
-                # Summary
-                print(f"\n=== Upload Summary for Part {part_number} ===")
-                if youtube_result:
-                    print(f"✓ YouTube: https://youtube.com/shorts/{youtube_result['id']}")
-                elif args.upload_youtube:
-                    print("✗ YouTube: Upload failed")
-                else:
-                    print("○ YouTube: Upload skipped (use --upload-youtube to enable)")
-                
-                if tiktok_result:
-                    post_ids = tiktok_result.get('data', {}).get('publicaly_available_post_id', [])
-                    if post_ids:
-                        print(f"✓ TikTok: Post ID {post_ids[0]}")
-                    else:
-                        print("✓ TikTok: Upload successful (processing)")
-                elif args.upload_tiktok:
-                    print("✗ TikTok: Upload failed")
-                else:
-                    print("○ TikTok: Upload skipped (use --upload-tiktok to enable)")
-                
-                if dropbox_result:
-                    print(f"✓ Dropbox: {dropbox_result['view_url']}")
-                    print(f"✓ Download: {dropbox_result['download_url']}")
-                    
-                    # Generate/append to CSV immediately after each upload
+                if github_result and github_result.get('download_url'):
+                    print(f"✓ GitHub: {github_result['download_url']}")
+                    # CSV logic (same as before, but use github_result['download_url'])
                     import csv
                     from datetime import datetime, timedelta
                     import pytz
-                    
-                    # Set timezone to PST
                     pst = pytz.timezone('US/Pacific')
-                    
-                    # Create CSV folder if it doesn't exist
                     csv_folder = 'bulk_upload_csvs'
                     os.makedirs(csv_folder, exist_ok=True)
-                    
-                    # Use a consistent filename for this run (based on start time)
                     if 'csv_start_time' not in locals():
-                        # Calculate start time based on arguments
                         if args.start_time:
-                            # Parse custom start time
                             try:
                                 csv_start_time = datetime.strptime(args.start_time, '%Y-%m-%d %H:%M')
                                 csv_start_time = pst.localize(csv_start_time)
@@ -511,15 +483,11 @@ def main():
                                 csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
                                 csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
                         else:
-                            # Use hours ahead default
                             csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
                             csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
                             print(f"📅 Scheduling first video {args.hours_ahead} hours ahead: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
-                        
                         csv_filename = f'ai_pictionary_bulk_upload_{csv_start_time.strftime("%Y%m%d_%H%M%S")}.csv'
                         csv_filepath = os.path.join(csv_folder, csv_filename)
-                        
-                        # Create new CSV with headers
                         headers = [
                             'Labels', 'Text', 'Year', 'Month (1 to 12)', 'Date', 'Hour (From 0 to 23)',
                             'Minutes', 'Queue Schedule', 'Post Type', 'Video Title', 'Video URL',
@@ -530,11 +498,7 @@ def main():
                         with open(csv_filepath, 'w', newline='', encoding='utf-8') as csvfile:
                             writer = csv.DictWriter(csvfile, fieldnames=headers)
                             writer.writeheader()
-                    
-                    # Calculate time for this video (1 hour after start, then increment)
                     video_time = csv_start_time + timedelta(hours=part_number - args.start_part)
-                    
-                    # Create row for this video
                     row = {
                         'Labels': f'Part {part_number}',
                         'Text': f"The World's Longest Game of Pictionary Part {part_number}. This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
@@ -546,7 +510,7 @@ def main():
                         'Queue Schedule': '',
                         'Post Type': 'SHORTS',
                         'Video Title': os.path.splitext(os.path.basename(video_path))[0],
-                        'Video URL': dropbox_result['download_url'],
+                        'Video URL': github_result['download_url'],
                         'Thumbnail URL': '',
                         'Subtitles URL': '',
                         'Subtitles Language': '',
@@ -560,18 +524,17 @@ def main():
                         'Notify Subscribers': 'NO',
                         'Made For Kids': 'NO'
                     }
-                    
-                    # Append row to CSV
                     with open(csv_filepath, 'a', newline='', encoding='utf-8') as csvfile:
                         writer = csv.DictWriter(csvfile, fieldnames=headers)
                         writer.writerow(row)
-                    
                     print(f"💾 Added to CSV: {csv_filepath}")
+                else:
+                    print("✗ GitHub: Upload failed or no download URL returned. Skipping CSV row for this video.")
             
             print(f"All steps completed for Part {part_number}.")
             
             # Wait between uploads (except for the last one, and only if uploading to platforms with rate limits)
-            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait for Dropbox (no rate limits)
+            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):
                 wait_seconds = args.wait_minutes * 60
                 current_time = datetime.now()
                 next_upload_time = current_time + timedelta(seconds=wait_seconds)

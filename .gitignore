@@ -17,3 +17,4 @@ client_secrets_drive.json
 drive_token.pickle
 dropbox_token.txt
 bulk_upload_csvs/
+github_config.json
