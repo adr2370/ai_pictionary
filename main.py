@@ -86,9 +86,20 @@ def find_latest_game_dir():
 
 def generate_video(game_dir, part_number=None):
     print(f"[3/4] Generating video from game session (Part {part_number})...")
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_name = f"pictionary_chain_{timestamp}_part{part_number}.mp4" if part_number else f"pictionary_chain_{timestamp}.mp4"
-    output_path = os.path.join(game_dir, output_name)
+    
+    # Create videos directory within the project folder if it doesn't exist
+    videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
+    os.makedirs(videos_dir, exist_ok=True)
+    
+    # Generate filename like "The World's Longest Game of Pictionary Part 1.mp4", etc.
+    if part_number:
+        output_name = f"The World's Longest Game of Pictionary Part {part_number}.mp4"
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_name = f"pictionary_chain_{timestamp}.mp4"
+    
+    output_path = os.path.join(videos_dir, output_name)
+    
     cmd = [
         sys.executable, VIDEO_SCRIPT,
         '--game-dir', game_dir,
@@ -97,7 +108,16 @@ def generate_video(game_dir, part_number=None):
     if part_number:
         cmd += ['--part', str(part_number)]
     subprocess.run(cmd, check=True)
-    print(f"Video generated: {output_path}")
+    
+    # Move the generated video to videos directory
+    temp_video_path = os.path.join(game_dir, output_name)
+    if os.path.exists(temp_video_path):
+        import shutil
+        shutil.move(temp_video_path, output_path)
+        print(f"Video saved to: {output_path}")
+    else:
+        print(f"Warning: Expected video file not found at {temp_video_path}")
+    
     return output_path
 
 
@@ -229,13 +249,13 @@ def main():
     parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
     parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads and retries (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
-    parser.add_argument('--chain-games', action='store_true', help='Use the last guess from each game as the starting word for the next game (creates a continuous chain)')
+    parser.add_argument('--no-chain-games', action='store_true', help='Disable chaining - each game starts with a random word instead of using the last guess from the previous game')
     
     # YouTube options
-    parser.add_argument('--skip-youtube', action='store_true', help='Skip YouTube upload')
+    parser.add_argument('--upload-youtube', action='store_true', help='Upload to YouTube (disabled by default)')
     
     # TikTok options
-    parser.add_argument('--skip-tiktok', action='store_true', help='Skip TikTok upload')
+    parser.add_argument('--upload-tiktok', action='store_true', help='Upload to TikTok (disabled by default)')
     parser.add_argument('--tiktok-config', default='tiktok_config.json', help='TikTok configuration file (default: tiktok_config.json)')
     parser.add_argument('--tiktok-client-key', help='TikTok app client key (overrides config file)')
     parser.add_argument('--tiktok-client-secret', help='TikTok app client secret (overrides config file)')
@@ -265,14 +285,14 @@ def main():
     tiktok_privacy_level = (args.tiktok_privacy or 
                            tiktok_config.get('default_privacy', 'SELF_ONLY'))
     
-    if not args.skip_tiktok and TIKTOK_AVAILABLE:
+    if args.upload_tiktok and TIKTOK_AVAILABLE:
         if not tiktok_client_key or not tiktok_client_secret:
             print("Warning: TikTok credentials not found. TikTok uploads will be skipped.")
             print("Configure credentials in one of these ways:")
             print(f"  1. Create {args.tiktok_config} with client_key and client_secret")
             print("  2. Use --tiktok-client-key and --tiktok-client-secret arguments")
             print("  3. Set TIKTOK_CLIENT_KEY and TIKTOK_CLIENT_SECRET environment variables")
-            args.skip_tiktok = True
+            args.upload_tiktok = False
 
     try:
         previous_game_dir = None
@@ -280,17 +300,17 @@ def main():
             part_number = args.start_part + i
             print(f"\n=== Starting video creation for Part {part_number} ===")
             
-            # For the first game, use no start word (random). For subsequent games, use the last guess from the previous game if chaining is enabled.
+            # For the first game, use no start word (random). For subsequent games, use the last guess from the previous game if chaining is enabled (default).
             start_word = None
-            if args.chain_games and i > 0 and previous_game_dir:
+            if not args.no_chain_games and i > 0 and previous_game_dir:
                 start_word = extract_last_guess_from_game(previous_game_dir)
                 if start_word:
                     print(f"Using last guess from previous game as starting word: '{start_word}'")
                 else:
                     print("Could not extract last guess from previous game, using random word")
-            elif args.chain_games and i == 0:
+            elif not args.no_chain_games and i == 0:
                 print("First game in chain - using random starting word")
-            elif not args.chain_games:
+            elif args.no_chain_games:
                 print("Chain mode disabled - each game starts with a random word")
             
             run_js_game(start_word)
@@ -305,8 +325,8 @@ def main():
                 youtube_result = None
                 tiktok_result = None
                 
-                # Upload to YouTube
-                if not args.skip_youtube:
+                # Upload to YouTube (only if explicitly requested)
+                if args.upload_youtube:
                     try:
                         youtube_result = upload_to_youtube(
                             video_path, 
@@ -316,9 +336,11 @@ def main():
                         )
                     except Exception as e:
                         print(f"YouTube upload failed: {e}")
+                else:
+                    print("YouTube upload skipped (use --upload-youtube to enable)")
                 
-                # Upload to TikTok
-                if not args.skip_tiktok and TIKTOK_AVAILABLE and tiktok_client_key and tiktok_client_secret:
+                # Upload to TikTok (only if explicitly requested)
+                if args.upload_tiktok and TIKTOK_AVAILABLE and tiktok_client_key and tiktok_client_secret:
                     try:
                         # Generate title from config template if available
                         title_template = tiktok_config.get('default_title_template', 
@@ -338,13 +360,17 @@ def main():
                         
                     except Exception as e:
                         print(f"TikTok upload failed: {e}")
+                else:
+                    print("TikTok upload skipped (use --upload-tiktok to enable)")
                 
                 # Summary
                 print(f"\n=== Upload Summary for Part {part_number} ===")
                 if youtube_result:
                     print(f"✓ YouTube: https://youtube.com/shorts/{youtube_result['id']}")
+                elif args.upload_youtube:
+                    print("✗ YouTube: Upload failed")
                 else:
-                    print("✗ YouTube: Upload failed or skipped")
+                    print("○ YouTube: Upload skipped (use --upload-youtube to enable)")
                 
                 if tiktok_result:
                     post_ids = tiktok_result.get('data', {}).get('publicaly_available_post_id', [])
@@ -352,13 +378,15 @@ def main():
                         print(f"✓ TikTok: Post ID {post_ids[0]}")
                     else:
                         print("✓ TikTok: Upload successful (processing)")
+                elif args.upload_tiktok:
+                    print("✗ TikTok: Upload failed")
                 else:
-                    print("✗ TikTok: Upload failed or skipped")
+                    print("○ TikTok: Upload skipped (use --upload-tiktok to enable)")
             
             print(f"All steps completed for Part {part_number}.")
             
-            # Wait between uploads (except for the last one)
-            if i < args.count - 1:  # Don't wait after the last upload
+            # Wait between uploads (except for the last one, and only if uploading to any platform)
+            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait after the last upload or if no uploads
                 wait_seconds = args.wait_minutes * 60
                 current_time = datetime.now()
                 next_upload_time = current_time + timedelta(seconds=wait_seconds)
@@ -366,6 +394,8 @@ def main():
                 print(f"Next upload will start at: {next_upload_time.strftime('%H:%M:%S')}")
                 time.sleep(wait_seconds)
                 print(f"Resuming at: {datetime.now().strftime('%H:%M:%S')}")
+            elif i < args.count - 1:
+                print(f"\nProceeding to next video immediately (no uploads enabled)")
                 
     except Exception as e:
         print(f"Error: {e}")
