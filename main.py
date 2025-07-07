@@ -22,16 +22,13 @@ except ImportError:
     print("Warning: TikTok uploader not available. Install tiktok_uploader.py to enable TikTok uploads.")
     TIKTOK_AVAILABLE = False
 
-# Import Google Drive uploader
+# Import Dropbox uploader
 try:
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from google.auth.transport.requests import Request
-    GOOGLE_DRIVE_AVAILABLE = True
+    import dropbox
+    DROPBOX_AVAILABLE = True
 except ImportError:
-    print("Warning: Google Drive uploader not available. Install google-api-python-client to enable Google Drive uploads.")
-    GOOGLE_DRIVE_AVAILABLE = False
+    print("Warning: Dropbox uploader not available. Install dropbox to enable Dropbox uploads.")
+    DROPBOX_AVAILABLE = False
 
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
@@ -208,133 +205,74 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes
             raise
 
 
-def get_drive_client():
-    """Create a Google Drive API client with valid credentials."""
-    if not GOOGLE_DRIVE_AVAILABLE:
-        raise ImportError("Google Drive API not available")
+def get_dropbox_client():
+    """Create a Dropbox client with valid access token."""
+    if not DROPBOX_AVAILABLE:
+        raise ImportError("Dropbox API not available")
     
-    creds = None
-    if os.path.exists('drive_token.pickle'):
-        with open('drive_token.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
+    # Get Dropbox access token from environment or file
+    access_token = os.getenv('DROPBOX_ACCESS_TOKEN')
+    if not access_token:
+        if os.path.exists('dropbox_token.txt'):
+            with open('dropbox_token.txt', 'r') as f:
+                access_token = f.read().strip()
         else:
-            if not os.path.exists('client_secrets_drive.json'):
-                raise FileNotFoundError(
-                    "client_secrets_drive.json not found. Please download your OAuth 2.0 credentials "
-                    "from Google Cloud Console and place them in the project directory as 'client_secrets_drive.json'."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file('client_secrets_drive.json', ['https://www.googleapis.com/auth/drive.file'])
-            creds = flow.run_local_server(port=0)
-        
-        with open('drive_token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
+            raise FileNotFoundError(
+                "Dropbox access token not found. Please set DROPBOX_ACCESS_TOKEN environment variable "
+                "or create dropbox_token.txt with your access token."
+            )
     
-    return build('drive', 'v3', credentials=creds)
+    return dropbox.Dropbox(access_token)
 
 
-def create_public_folder(drive_service, folder_name="AI Pictionary Videos"):
-    """Create a public folder in Google Drive or find existing one."""
-    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = drive_service.files().list(q=query).execute()
-    files = results.get('files', [])
+def upload_to_dropbox(video_path, part_number=None):
+    """Upload video to Dropbox and create a shared link."""
+    print(f"[4c/5] Uploading video to Dropbox (Part {part_number})...")
     
-    if files:
-        folder_id = files[0]['id']
-        print(f"📁 Found existing folder: {folder_name}")
-    else:
-        folder_metadata = {
-            'name': folder_name,
-            'mimeType': 'application/vnd.google-apps.folder'
-        }
-        folder = drive_service.files().create(body=folder_metadata, fields='id').execute()
-        folder_id = folder.get('id')
-        print(f"📁 Created new folder: {folder_name}")
-    
-    return folder_id
-
-
-def upload_to_google_drive(video_path, part_number=None):
-    """Upload video to Google Drive and make it publicly accessible."""
-    print(f"[4c/5] Uploading video to Google Drive (Part {part_number})...")
-    
-    if not GOOGLE_DRIVE_AVAILABLE:
-        print("Google Drive uploader not available. Skipping Google Drive upload.")
+    if not DROPBOX_AVAILABLE:
+        print("Dropbox uploader not available. Skipping Dropbox upload.")
         return None
     
     try:
-        # Initialize Google Drive client
-        drive_service = get_drive_client()
-        
-        # Create or find public folder
-        folder_id = create_public_folder(drive_service)
+        # Initialize Dropbox client
+        dbx = get_dropbox_client()
         
         video_name = os.path.basename(video_path)
+        dropbox_path = f"/AI Pictionary Videos/{video_name}"
         
-        # Check if file already exists
-        # Use a simpler query that avoids filename issues
-        query = f"'{folder_id}' in parents and trashed=false"
-        results = drive_service.files().list(q=query).execute()
-        existing_files = [f for f in results.get('files', []) if f['name'] == video_name]
+        # Upload the file (will overwrite if it exists)
+        with open(video_path, 'rb') as f:
+            dbx.files_upload(f.read(), dropbox_path, mode=dropbox.files.WriteMode.overwrite)
+        print(f"📤 Uploaded: {video_name}")
         
-        if existing_files:
-            file_id = existing_files[0]['id']
-            print(f"✅ Video already exists: {video_name}")
-        else:
-            # Upload the file
-            file_metadata = {
-                'name': video_name,
-                'parents': [folder_id]
-            }
-            
-            media = MediaFileUpload(video_path, resumable=True)
-            file = drive_service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id,webViewLink,webContentLink'
-            ).execute()
-            
-            file_id = file.get('id')
-            print(f"📤 Uploaded: {video_name}")
+        # Create a shared link
+        shared_link = dbx.sharing_create_shared_link(dropbox_path)
         
-        # Make the file publicly accessible
-        permission = {
-            'type': 'anyone',
-            'role': 'reader'
-        }
+        # Convert to direct download link (replace ?dl=0 with ?dl=1)
+        direct_download_url = shared_link.url.replace('?dl=0', '?dl=1')
         
-        try:
-            drive_service.permissions().create(
-                fileId=file_id,
-                body=permission
-            ).execute()
-            print(f"🌐 Made public: {video_name}")
-        except Exception as e:
-            print(f"⚠️ Warning: Could not make {video_name} public: {e}")
+        # If the URL doesn't have ?dl=0, add ?dl=1
+        if '?dl=' not in direct_download_url:
+            direct_download_url += '?dl=1'
         
-        # Get the public URL
-        file_info = drive_service.files().get(
-            fileId=file_id,
-            fields='webViewLink,webContentLink,size'
-        ).execute()
+        # Get file size
+        metadata = dbx.files_get_metadata(dropbox_path)
+        size_mb = round(metadata.size / (1024 * 1024), 1)
         
         result = {
-            'id': file_id,
+            'id': metadata.id,
             'name': video_name,
-            'view_url': file_info.get('webViewLink'),
-            'download_url': file_info.get('webContentLink'),
-            'size_mb': round(int(file_info.get('size', 0)) / (1024 * 1024), 1)
+            'view_url': shared_link.url,
+            'download_url': direct_download_url,
+            'size_mb': size_mb
         }
         
-        print(f"✅ Google Drive URL: {result['view_url']}")
+        print(f"✅ Dropbox URL: {result['view_url']}")
         print(f"✅ Download URL: {result['download_url']}")
         return result
         
     except Exception as e:
-        print(f"Google Drive upload failed: {e}")
+        print(f"Dropbox upload failed: {e}")
         return None
 
 
@@ -403,9 +341,9 @@ def main():
     parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], 
                        help='TikTok video privacy level (overrides config file)')
     
-    # Google Drive options
-    parser.add_argument('--upload-drive', action='store_true', default=True, help='Upload to Google Drive (enabled by default)')
-    parser.add_argument('--no-drive', action='store_true', help='Disable Google Drive upload')
+    # Dropbox options
+    parser.add_argument('--upload-dropbox', action='store_true', default=True, help='Upload to Dropbox (enabled by default)')
+    parser.add_argument('--no-dropbox', action='store_true', help='Disable Dropbox upload')
     
     args = parser.parse_args()
 
@@ -469,7 +407,7 @@ def main():
                 # Track upload results
                 youtube_result = None
                 tiktok_result = None
-                drive_result = None
+                dropbox_result = None
                 
                 # Upload to YouTube (only if explicitly requested)
                 if args.upload_youtube:
@@ -509,14 +447,14 @@ def main():
                 else:
                     print("TikTok upload skipped (use --upload-tiktok to enable)")
                 
-                # Upload to Google Drive (enabled by default, unless --no-drive is used)
-                if args.upload_drive and not args.no_drive:
+                # Upload to Dropbox (enabled by default, unless --no-dropbox is used)
+                if args.upload_dropbox and not args.no_dropbox:
                     try:
-                        drive_result = upload_to_google_drive(video_path, part_number=part_number)
+                        dropbox_result = upload_to_dropbox(video_path, part_number=part_number)
                     except Exception as e:
-                        print(f"Google Drive upload failed: {e}")
+                        print(f"Dropbox upload failed: {e}")
                 else:
-                    print("Google Drive upload skipped (use --no-drive to disable)")
+                    print("Dropbox upload skipped (use --no-dropbox to disable)")
                 
                 # Summary
                 print(f"\n=== Upload Summary for Part {part_number} ===")
@@ -538,18 +476,24 @@ def main():
                 else:
                     print("○ TikTok: Upload skipped (use --upload-tiktok to enable)")
                 
-                if drive_result:
-                    print(f"✓ Google Drive: {drive_result['view_url']}")
-                    print(f"✓ Download: {drive_result['download_url']}")
-                elif args.upload_drive and not args.no_drive:
-                    print("✗ Google Drive: Upload failed")
-                else:
-                    print("○ Google Drive: Upload skipped (use --no-drive to disable)")
+                if dropbox_result:
+                    print(f"✓ Dropbox: {dropbox_result['view_url']}")
+                    print(f"✓ Download: {dropbox_result['download_url']}")
+                    
+                    # Collect dropbox_result for CSV
+                    if 'all_dropbox_results' not in locals():
+                        all_dropbox_results = []
+                    all_dropbox_results.append({
+                        'filename': os.path.basename(video_path),
+                        'title': os.path.splitext(os.path.basename(video_path))[0],
+                        'download_url': dropbox_result['download_url'],
+                        'part_number': part_number
+                    })
             
             print(f"All steps completed for Part {part_number}.")
             
             # Wait between uploads (except for the last one, and only if uploading to platforms with rate limits)
-            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait for Google Drive (no rate limits)
+            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait for Dropbox (no rate limits)
                 wait_seconds = args.wait_minutes * 60
                 current_time = datetime.now()
                 next_upload_time = current_time + timedelta(seconds=wait_seconds)
@@ -560,6 +504,74 @@ def main():
             elif i < args.count - 1:
                 print(f"\nProceeding to next video immediately (no uploads enabled)")
                 
+        # After all videos are processed, generate the CSV
+        if 'all_dropbox_results' in locals() and all_dropbox_results:
+            import csv
+            from datetime import datetime, timedelta
+            import pytz
+            # Set timezone to PST
+            pst = pytz.timezone('US/Pacific')
+            # Start time: 1 hour from now
+            start_time = datetime.now(pst) + timedelta(hours=1)
+            start_time = start_time.replace(minute=0, second=0, microsecond=0)
+            # CSV headers (exact match from template)
+            headers = [
+                'Labels', 'Text', 'Year', 'Month (1 to 12)', 'Date', 'Hour (From 0 to 23)',
+                'Minutes', 'Queue Schedule', 'Post Type', 'Video Title', 'Video URL',
+                'Thumbnail URL', 'Subtitles URL', 'Subtitles Language', 'Subtitles Auto-Sync',
+                'Privacy Status', 'Category', 'Playlist', 'Tags', 'License', 'Embeddable',
+                'Notify Subscribers', 'Made For Kids'
+            ]
+            rows = []
+            current_time = start_time
+            for i, video in enumerate(all_dropbox_results):
+                row = {
+                    'Labels': '',
+                    'Text': "This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
+                    'Year': current_time.year,
+                    'Month (1 to 12)': current_time.month,
+                    'Date': current_time.day,
+                    'Hour (From 0 to 23)': current_time.hour,
+                    'Minutes': current_time.minute,
+                    'Queue Schedule': '',
+                    'Post Type': 'SHORTS',
+                    'Video Title': video['title'],
+                    'Video URL': video['download_url'],
+                    'Thumbnail URL': '',
+                    'Subtitles URL': '',
+                    'Subtitles Language': '',
+                    'Subtitles Auto-Sync': '',
+                    'Privacy Status': 'PUBLIC',
+                    'Category': 'Comedy',
+                    'Playlist': '',
+                    'Tags': 'AI,Pictionary,Comedy,ArtificialIntelligence,Game,AI Fails,Funny',
+                    'License': 'YOUTUBE',
+                    'Embeddable': 'YES',
+                    'Notify Subscribers': 'NO',
+                    'Made For Kids': 'NO'
+                }
+                rows.append(row)
+                current_time += timedelta(hours=1)
+            # Create CSV folder if it doesn't exist
+            csv_folder = 'bulk_upload_csvs'
+            os.makedirs(csv_folder, exist_ok=True)
+            
+            # Generate timestamped filename
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            output_file = os.path.join(csv_folder, f'ai_pictionary_bulk_upload_{timestamp}.csv')
+            
+            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"\n✅ Generated bulk upload CSV: {output_file}")
+            print(f"📊 Total posts scheduled: {len(rows)}")
+            print(f"📅 Start time: {start_time.strftime('%Y-%m-%d %H:%M %Z')}")
+            print(f"📅 End time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
+            print(f"🎯 Videos: {len(rows)}")
+            print(f"⏰ Schedule: 1 video per hour, 24/7")
+            print(f"📁 CSV saved in: {csv_folder}/")
+            
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
