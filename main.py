@@ -345,6 +345,10 @@ def main():
     parser.add_argument('--upload-dropbox', action='store_true', default=True, help='Upload to Dropbox (enabled by default)')
     parser.add_argument('--no-dropbox', action='store_true', help='Disable Dropbox upload')
     
+    # CSV scheduling options
+    parser.add_argument('--hours-ahead', type=int, default=3, help='Hours ahead of now to schedule the first video (default: 3)')
+    parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST)')
+    
     args = parser.parse_args()
 
     # Load TikTok configuration
@@ -480,15 +484,89 @@ def main():
                     print(f"✓ Dropbox: {dropbox_result['view_url']}")
                     print(f"✓ Download: {dropbox_result['download_url']}")
                     
-                    # Collect dropbox_result for CSV
-                    if 'all_dropbox_results' not in locals():
-                        all_dropbox_results = []
-                    all_dropbox_results.append({
-                        'filename': os.path.basename(video_path),
-                        'title': os.path.splitext(os.path.basename(video_path))[0],
-                        'download_url': dropbox_result['download_url'],
-                        'part_number': part_number
-                    })
+                    # Generate/append to CSV immediately after each upload
+                    import csv
+                    from datetime import datetime, timedelta
+                    import pytz
+                    
+                    # Set timezone to PST
+                    pst = pytz.timezone('US/Pacific')
+                    
+                    # Create CSV folder if it doesn't exist
+                    csv_folder = 'bulk_upload_csvs'
+                    os.makedirs(csv_folder, exist_ok=True)
+                    
+                    # Use a consistent filename for this run (based on start time)
+                    if 'csv_start_time' not in locals():
+                        # Calculate start time based on arguments
+                        if args.start_time:
+                            # Parse custom start time
+                            try:
+                                csv_start_time = datetime.strptime(args.start_time, '%Y-%m-%d %H:%M')
+                                csv_start_time = pst.localize(csv_start_time)
+                                print(f"📅 Using custom start time: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
+                            except ValueError:
+                                print(f"❌ Invalid start time format: {args.start_time}. Use YYYY-MM-DD HH:MM")
+                                print(f"📅 Falling back to {args.hours_ahead} hours ahead")
+                                csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
+                                csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
+                        else:
+                            # Use hours ahead default
+                            csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
+                            csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
+                            print(f"📅 Scheduling first video {args.hours_ahead} hours ahead: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
+                        
+                        csv_filename = f'ai_pictionary_bulk_upload_{csv_start_time.strftime("%Y%m%d_%H%M%S")}.csv'
+                        csv_filepath = os.path.join(csv_folder, csv_filename)
+                        
+                        # Create new CSV with headers
+                        headers = [
+                            'Labels', 'Text', 'Year', 'Month (1 to 12)', 'Date', 'Hour (From 0 to 23)',
+                            'Minutes', 'Queue Schedule', 'Post Type', 'Video Title', 'Video URL',
+                            'Thumbnail URL', 'Subtitles URL', 'Subtitles Language', 'Subtitles Auto-Sync',
+                            'Privacy Status', 'Category', 'Playlist', 'Tags', 'License', 'Embeddable',
+                            'Notify Subscribers', 'Made For Kids'
+                        ]
+                        with open(csv_filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                            writer = csv.DictWriter(csvfile, fieldnames=headers)
+                            writer.writeheader()
+                    
+                    # Calculate time for this video (1 hour after start, then increment)
+                    video_time = csv_start_time + timedelta(hours=part_number - args.start_part)
+                    
+                    # Create row for this video
+                    row = {
+                        'Labels': '',
+                        'Text': "This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
+                        'Year': video_time.year,
+                        'Month (1 to 12)': video_time.month,
+                        'Date': video_time.day,
+                        'Hour (From 0 to 23)': video_time.hour,
+                        'Minutes': video_time.minute,
+                        'Queue Schedule': '',
+                        'Post Type': 'SHORTS',
+                        'Video Title': os.path.splitext(os.path.basename(video_path))[0],
+                        'Video URL': dropbox_result['download_url'],
+                        'Thumbnail URL': '',
+                        'Subtitles URL': '',
+                        'Subtitles Language': '',
+                        'Subtitles Auto-Sync': '',
+                        'Privacy Status': 'PUBLIC',
+                        'Category': 'Comedy',
+                        'Playlist': '',
+                        'Tags': 'AI,Pictionary,Comedy,ArtificialIntelligence,Game,AI Fails,Funny',
+                        'License': 'YOUTUBE',
+                        'Embeddable': 'YES',
+                        'Notify Subscribers': 'NO',
+                        'Made For Kids': 'NO'
+                    }
+                    
+                    # Append row to CSV
+                    with open(csv_filepath, 'a', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=headers)
+                        writer.writerow(row)
+                    
+                    print(f"💾 Added to CSV: {csv_filepath}")
             
             print(f"All steps completed for Part {part_number}.")
             
@@ -504,73 +582,15 @@ def main():
             elif i < args.count - 1:
                 print(f"\nProceeding to next video immediately (no uploads enabled)")
                 
-        # After all videos are processed, generate the CSV
-        if 'all_dropbox_results' in locals() and all_dropbox_results:
-            import csv
-            from datetime import datetime, timedelta
-            import pytz
-            # Set timezone to PST
-            pst = pytz.timezone('US/Pacific')
-            # Start time: 1 hour from now
-            start_time = datetime.now(pst) + timedelta(hours=1)
-            start_time = start_time.replace(minute=0, second=0, microsecond=0)
-            # CSV headers (exact match from template)
-            headers = [
-                'Labels', 'Text', 'Year', 'Month (1 to 12)', 'Date', 'Hour (From 0 to 23)',
-                'Minutes', 'Queue Schedule', 'Post Type', 'Video Title', 'Video URL',
-                'Thumbnail URL', 'Subtitles URL', 'Subtitles Language', 'Subtitles Auto-Sync',
-                'Privacy Status', 'Category', 'Playlist', 'Tags', 'License', 'Embeddable',
-                'Notify Subscribers', 'Made For Kids'
-            ]
-            rows = []
-            current_time = start_time
-            for i, video in enumerate(all_dropbox_results):
-                row = {
-                    'Labels': '',
-                    'Text': "This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
-                    'Year': current_time.year,
-                    'Month (1 to 12)': current_time.month,
-                    'Date': current_time.day,
-                    'Hour (From 0 to 23)': current_time.hour,
-                    'Minutes': current_time.minute,
-                    'Queue Schedule': '',
-                    'Post Type': 'SHORTS',
-                    'Video Title': video['title'],
-                    'Video URL': video['download_url'],
-                    'Thumbnail URL': '',
-                    'Subtitles URL': '',
-                    'Subtitles Language': '',
-                    'Subtitles Auto-Sync': '',
-                    'Privacy Status': 'PUBLIC',
-                    'Category': 'Comedy',
-                    'Playlist': '',
-                    'Tags': 'AI,Pictionary,Comedy,ArtificialIntelligence,Game,AI Fails,Funny',
-                    'License': 'YOUTUBE',
-                    'Embeddable': 'YES',
-                    'Notify Subscribers': 'NO',
-                    'Made For Kids': 'NO'
-                }
-                rows.append(row)
-                current_time += timedelta(hours=1)
-            # Create CSV folder if it doesn't exist
-            csv_folder = 'bulk_upload_csvs'
-            os.makedirs(csv_folder, exist_ok=True)
-            
-            # Generate timestamped filename
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_file = os.path.join(csv_folder, f'ai_pictionary_bulk_upload_{timestamp}.csv')
-            
-            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-                writer = csv.DictWriter(csvfile, fieldnames=headers)
-                writer.writeheader()
-                writer.writerows(rows)
-            print(f"\n✅ Generated bulk upload CSV: {output_file}")
-            print(f"📊 Total posts scheduled: {len(rows)}")
-            print(f"📅 Start time: {start_time.strftime('%Y-%m-%d %H:%M %Z')}")
-            print(f"📅 End time: {current_time.strftime('%Y-%m-%d %H:%M %Z')}")
-            print(f"🎯 Videos: {len(rows)}")
+        # Final CSV summary
+        if 'csv_filepath' in locals():
+            print(f"\n✅ Final CSV Summary:")
+            print(f"📁 CSV file: {csv_filepath}")
+            print(f"📊 Total videos in CSV: {part_number - args.start_part + 1}")
+            print(f"📅 Start time: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
+            print(f"📅 End time: {(csv_start_time + timedelta(hours=part_number - args.start_part)).strftime('%Y-%m-%d %H:%M %Z')}")
             print(f"⏰ Schedule: 1 video per hour, 24/7")
-            print(f"📁 CSV saved in: {csv_folder}/")
+            print(f"📁 CSV saved in: bulk_upload_csvs/")
             
     except Exception as e:
         print(f"Error: {e}")
