@@ -22,6 +22,17 @@ except ImportError:
     print("Warning: TikTok uploader not available. Install tiktok_uploader.py to enable TikTok uploads.")
     TIKTOK_AVAILABLE = False
 
+# Import Google Drive uploader
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    print("Warning: Google Drive uploader not available. Install google-api-python-client to enable Google Drive uploads.")
+    GOOGLE_DRIVE_AVAILABLE = False
+
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
 VIDEO_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-python-generator.py')
@@ -197,6 +208,136 @@ def upload_to_youtube(video_path, part_number=None, max_retries=50, wait_minutes
             raise
 
 
+def get_drive_client():
+    """Create a Google Drive API client with valid credentials."""
+    if not GOOGLE_DRIVE_AVAILABLE:
+        raise ImportError("Google Drive API not available")
+    
+    creds = None
+    if os.path.exists('drive_token.pickle'):
+        with open('drive_token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists('client_secrets_drive.json'):
+                raise FileNotFoundError(
+                    "client_secrets_drive.json not found. Please download your OAuth 2.0 credentials "
+                    "from Google Cloud Console and place them in the project directory as 'client_secrets_drive.json'."
+                )
+            flow = InstalledAppFlow.from_client_secrets_file('client_secrets_drive.json', ['https://www.googleapis.com/auth/drive.file'])
+            creds = flow.run_local_server(port=0)
+        
+        with open('drive_token.pickle', 'wb') as token:
+            pickle.dump(creds, token)
+    
+    return build('drive', 'v3', credentials=creds)
+
+
+def create_public_folder(drive_service, folder_name="AI Pictionary Videos"):
+    """Create a public folder in Google Drive or find existing one."""
+    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    results = drive_service.files().list(q=query).execute()
+    files = results.get('files', [])
+    
+    if files:
+        folder_id = files[0]['id']
+        print(f"📁 Found existing folder: {folder_name}")
+    else:
+        folder_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        folder = drive_service.files().create(body=folder_metadata, fields='id').execute()
+        folder_id = folder.get('id')
+        print(f"📁 Created new folder: {folder_name}")
+    
+    return folder_id
+
+
+def upload_to_google_drive(video_path, part_number=None):
+    """Upload video to Google Drive and make it publicly accessible."""
+    print(f"[4c/5] Uploading video to Google Drive (Part {part_number})...")
+    
+    if not GOOGLE_DRIVE_AVAILABLE:
+        print("Google Drive uploader not available. Skipping Google Drive upload.")
+        return None
+    
+    try:
+        # Initialize Google Drive client
+        drive_service = get_drive_client()
+        
+        # Create or find public folder
+        folder_id = create_public_folder(drive_service)
+        
+        video_name = os.path.basename(video_path)
+        
+        # Check if file already exists
+        # Use a simpler query that avoids filename issues
+        query = f"'{folder_id}' in parents and trashed=false"
+        results = drive_service.files().list(q=query).execute()
+        existing_files = [f for f in results.get('files', []) if f['name'] == video_name]
+        
+        if existing_files:
+            file_id = existing_files[0]['id']
+            print(f"✅ Video already exists: {video_name}")
+        else:
+            # Upload the file
+            file_metadata = {
+                'name': video_name,
+                'parents': [folder_id]
+            }
+            
+            media = MediaFileUpload(video_path, resumable=True)
+            file = drive_service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id,webViewLink,webContentLink'
+            ).execute()
+            
+            file_id = file.get('id')
+            print(f"📤 Uploaded: {video_name}")
+        
+        # Make the file publicly accessible
+        permission = {
+            'type': 'anyone',
+            'role': 'reader'
+        }
+        
+        try:
+            drive_service.permissions().create(
+                fileId=file_id,
+                body=permission
+            ).execute()
+            print(f"🌐 Made public: {video_name}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not make {video_name} public: {e}")
+        
+        # Get the public URL
+        file_info = drive_service.files().get(
+            fileId=file_id,
+            fields='webViewLink,webContentLink,size'
+        ).execute()
+        
+        result = {
+            'id': file_id,
+            'name': video_name,
+            'view_url': file_info.get('webViewLink'),
+            'download_url': file_info.get('webContentLink'),
+            'size_mb': round(int(file_info.get('size', 0)) / (1024 * 1024), 1)
+        }
+        
+        print(f"✅ Google Drive URL: {result['view_url']}")
+        print(f"✅ Download URL: {result['download_url']}")
+        return result
+        
+    except Exception as e:
+        print(f"Google Drive upload failed: {e}")
+        return None
+
+
 def upload_to_tiktok_with_retry(video_path, client_key, client_secret, part_number=None, max_retries=50, wait_minutes=60):
     """Upload video to TikTok with retry logic."""
     print(f"[4b/5] Uploading video to TikTok (Part {part_number})...")
@@ -262,6 +403,10 @@ def main():
     parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], 
                        help='TikTok video privacy level (overrides config file)')
     
+    # Google Drive options
+    parser.add_argument('--upload-drive', action='store_true', default=True, help='Upload to Google Drive (enabled by default)')
+    parser.add_argument('--no-drive', action='store_true', help='Disable Google Drive upload')
+    
     args = parser.parse_args()
 
     # Load TikTok configuration
@@ -324,6 +469,7 @@ def main():
                 # Track upload results
                 youtube_result = None
                 tiktok_result = None
+                drive_result = None
                 
                 # Upload to YouTube (only if explicitly requested)
                 if args.upload_youtube:
@@ -363,6 +509,15 @@ def main():
                 else:
                     print("TikTok upload skipped (use --upload-tiktok to enable)")
                 
+                # Upload to Google Drive (enabled by default, unless --no-drive is used)
+                if args.upload_drive and not args.no_drive:
+                    try:
+                        drive_result = upload_to_google_drive(video_path, part_number=part_number)
+                    except Exception as e:
+                        print(f"Google Drive upload failed: {e}")
+                else:
+                    print("Google Drive upload skipped (use --no-drive to disable)")
+                
                 # Summary
                 print(f"\n=== Upload Summary for Part {part_number} ===")
                 if youtube_result:
@@ -382,11 +537,19 @@ def main():
                     print("✗ TikTok: Upload failed")
                 else:
                     print("○ TikTok: Upload skipped (use --upload-tiktok to enable)")
+                
+                if drive_result:
+                    print(f"✓ Google Drive: {drive_result['view_url']}")
+                    print(f"✓ Download: {drive_result['download_url']}")
+                elif args.upload_drive and not args.no_drive:
+                    print("✗ Google Drive: Upload failed")
+                else:
+                    print("○ Google Drive: Upload skipped (use --no-drive to disable)")
             
             print(f"All steps completed for Part {part_number}.")
             
-            # Wait between uploads (except for the last one, and only if uploading to any platform)
-            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait after the last upload or if no uploads
+            # Wait between uploads (except for the last one, and only if uploading to platforms with rate limits)
+            if i < args.count - 1 and (args.upload_youtube or args.upload_tiktok):  # Don't wait for Google Drive (no rate limits)
                 wait_seconds = args.wait_minutes * 60
                 current_time = datetime.now()
                 next_upload_time = current_time + timedelta(seconds=wait_seconds)

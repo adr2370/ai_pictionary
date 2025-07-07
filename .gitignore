@@ -13,3 +13,5 @@ kohya_ss/
 sd-scripts/
 tiktok_config.json
 tiktok_tokens.json
+client_secrets_drive.json
+drive_token.pickle
