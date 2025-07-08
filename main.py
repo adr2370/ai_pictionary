@@ -352,6 +352,7 @@ def main():
     # CSV scheduling options
     parser.add_argument('--hours-ahead', type=int, default=3, help='Hours ahead of now to schedule the first video (default: 3)')
     parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST)')
+    parser.add_argument('--posts-per-day', type=int, default=8, help='Number of posts per day for bulk upload scheduling (default: 8)')
     
     args = parser.parse_args()
 
@@ -386,6 +387,11 @@ def main():
             args.upload_tiktok = False
 
     try:
+        # Calculate interval based on posts per day
+        posts_per_day = args.posts_per_day
+        interval_hours = 24 / posts_per_day
+        print(f"🕒 Scheduling {posts_per_day} posts per day, every {interval_hours:.2f} hours.")
+        
         previous_game_dir = None
         for i in range(args.count):
             part_number = args.start_part + i
@@ -498,7 +504,7 @@ def main():
                         with open(csv_filepath, 'w', newline='', encoding='utf-8') as csvfile:
                             writer = csv.DictWriter(csvfile, fieldnames=headers)
                             writer.writeheader()
-                    video_time = csv_start_time + timedelta(hours=part_number - args.start_part)
+                    video_time = csv_start_time + timedelta(hours=(part_number - args.start_part) * interval_hours)
                     row = {
                         'Labels': f'Part {part_number}',
                         'Text': f"The World's Longest Game of Pictionary Part {part_number}. This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
@@ -551,8 +557,8 @@ def main():
             print(f"📁 CSV file: {csv_filepath}")
             print(f"📊 Total videos in CSV: {part_number - args.start_part + 1}")
             print(f"📅 Start time: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
-            print(f"📅 End time: {(csv_start_time + timedelta(hours=part_number - args.start_part)).strftime('%Y-%m-%d %H:%M %Z')}")
-            print(f"⏰ Schedule: 1 video per hour, 24/7")
+            print(f"📅 End time: {(csv_start_time + timedelta(hours=(part_number - args.start_part) * interval_hours)).strftime('%Y-%m-%d %H:%M %Z')}")
+            print(f"⏰ Schedule: {posts_per_day} videos per day, every {interval_hours:.2f} hours")
             print(f"📁 CSV saved in: bulk_upload_csvs/")
             
     except Exception as e:
