@@ -515,7 +515,7 @@ def main():
                         'Minutes': video_time.minute,
                         'Queue Schedule': '',
                         'Post Type': 'SHORTS',
-                        'Video Title': os.path.splitext(os.path.basename(video_path))[0],
+                        'Video Title': f"The World's Longest Game of Pictionary Part {part_number}",
                         'Video URL': github_result['download_url'],
                         'Thumbnail URL': '',
                         'Subtitles URL': '',
