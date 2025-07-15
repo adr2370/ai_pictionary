@@ -271,17 +271,14 @@ def upload_to_github_release(video_path, part_number=None):
     try:
         token, repo = get_github_config()
         video_name = os.path.basename(video_path)
-        # Use a tag for this batch (e.g., pictionary-videos)
         tag = "pictionary-videos"
         release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
         headers = {
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json'
         }
-        # Check if release exists
         r = requests.get(release_url, headers=headers)
         if r.status_code == 404:
-            # Create release
             create_url = f"https://api.github.com/repos/{repo}/releases"
             data = {
                 'tag_name': tag,
@@ -296,16 +293,38 @@ def upload_to_github_release(video_path, part_number=None):
         else:
             release = r.json()
         upload_url = release['upload_url'].split('{')[0]
-        # Check if asset already exists
         assets_url = release['assets_url']
-        assets = requests.get(assets_url, headers=headers).json()
-        for asset in assets:
+        # Paginate through all assets
+        all_assets = []
+        page = 1
+        while True:
+            paged_url = assets_url + f'?per_page=100&page={page}'
+            resp = requests.get(paged_url, headers=headers)
+            assets = resp.json()
+            if not isinstance(assets, list) or not assets:
+                break
+            all_assets.extend(assets)
+            if len(assets) < 100:
+                break
+            page += 1
+        print(f"Assets before deletion: {[a['name'] for a in all_assets]}")
+        deleted_any = False
+        for asset in all_assets:
             if asset['name'] == video_name:
-                print(f"✅ Video already exists in release: {video_name}")
-                return {
-                    'name': video_name,
-                    'download_url': asset['browser_download_url']
-                }
+                print(f"⚠️ Asset {video_name} already exists. Deleting before upload...")
+                delete_url = asset['url']
+                del_resp = requests.delete(delete_url, headers=headers)
+                if del_resp.status_code == 204:
+                    print(f"✅ Deleted existing asset: {video_name}")
+                    deleted_any = True
+                else:
+                    print(f"❌ Failed to delete existing asset: {video_name}. Status: {del_resp.status_code}, Response: {del_resp.text}")
+                    raise Exception(f"Failed to delete existing asset: {video_name}")
+        if deleted_any:
+            time.sleep(2)
+            # Re-fetch asset list for debug
+            resp = requests.get(assets_url + '?per_page=100', headers=headers)
+            print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
         # Upload asset
         with open(video_path, 'rb') as f:
             upload_headers = headers.copy()
@@ -317,7 +336,14 @@ def upload_to_github_release(video_path, part_number=None):
                 params=params,
                 data=f
             )
-        upload_resp.raise_for_status()
+        try:
+            upload_resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print(f"GitHub upload failed: {e}")
+            print(f"GitHub response: {upload_resp.text}")
+            if upload_resp.status_code == 422:
+                print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
+            raise
         asset = upload_resp.json()
         print(f"✅ Uploaded to GitHub Releases: {asset['browser_download_url']}")
         return {
@@ -326,6 +352,98 @@ def upload_to_github_release(video_path, part_number=None):
         }
     except Exception as e:
         print(f"GitHub upload failed: {e}")
+        return None
+
+
+def upload_image_to_github_release(image_path, part_number=None):
+    """Upload a PNG image to GitHub Releases and return the direct .png URL."""
+    print(f"[4d/5] Uploading thumbnail to GitHub Releases (Part {part_number})...")
+    if not GITHUB_AVAILABLE:
+        print("GitHub uploader not available. Skipping GitHub upload.")
+        return None
+    try:
+        token, repo = get_github_config()
+        image_name = os.path.basename(image_path)
+        tag = "pictionary-videos"
+        release_url = f"https://api.github.com/repos/{repo}/releases/tags/{tag}"
+        headers = {
+            'Authorization': f'token {token}',
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        r = requests.get(release_url, headers=headers)
+        if r.status_code == 404:
+            create_url = f"https://api.github.com/repos/{repo}/releases"
+            data = {
+                'tag_name': tag,
+                'name': 'AI Pictionary Videos',
+                'body': 'Batch upload of AI Pictionary videos',
+                'draft': False,
+                'prerelease': False
+            }
+            r = requests.post(create_url, headers=headers, json=data)
+            r.raise_for_status()
+            release = r.json()
+        else:
+            release = r.json()
+        upload_url = release['upload_url'].split('{')[0]
+        assets_url = release['assets_url']
+        # Paginate through all assets
+        all_assets = []
+        page = 1
+        while True:
+            paged_url = assets_url + f'?per_page=100&page={page}'
+            resp = requests.get(paged_url, headers=headers)
+            assets = resp.json()
+            if not isinstance(assets, list) or not assets:
+                break
+            all_assets.extend(assets)
+            if len(assets) < 100:
+                break
+            page += 1
+        print(f"Assets before deletion: {[a['name'] for a in all_assets]}")
+        deleted_any = False
+        for asset in all_assets:
+            if asset['name'] == image_name:
+                print(f"⚠️ Thumbnail {image_name} already exists. Deleting before upload...")
+                delete_url = asset['url']
+                del_resp = requests.delete(delete_url, headers=headers)
+                if del_resp.status_code == 204:
+                    print(f"✅ Deleted existing thumbnail: {image_name}")
+                    deleted_any = True
+                else:
+                    print(f"❌ Failed to delete existing thumbnail: {image_name}. Status: {del_resp.status_code}, Response: {del_resp.text}")
+                    raise Exception(f"Failed to delete existing thumbnail: {image_name}")
+        if deleted_any:
+            time.sleep(2)
+            # Re-fetch asset list for debug
+            resp = requests.get(assets_url + '?per_page=100', headers=headers)
+            print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
+        with open(image_path, 'rb') as f:
+            upload_headers = headers.copy()
+            upload_headers['Content-Type'] = 'image/png'
+            params = {'name': image_name}
+            upload_resp = requests.post(
+                upload_url,
+                headers=upload_headers,
+                params=params,
+                data=f
+            )
+        try:
+            upload_resp.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            print(f"GitHub thumbnail upload failed: {e}")
+            print(f"GitHub response: {upload_resp.text}")
+            if upload_resp.status_code == 422:
+                print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
+            raise
+        asset = upload_resp.json()
+        print(f"✅ Uploaded thumbnail to GitHub Releases: {asset['browser_download_url']}")
+        return {
+            'name': image_name,
+            'download_url': asset['browser_download_url']
+        }
+    except Exception as e:
+        print(f"GitHub thumbnail upload failed: {e}")
         return None
 
 
@@ -353,6 +471,7 @@ def main():
     parser.add_argument('--hours-ahead', type=int, default=3, help='Hours ahead of now to schedule the first video (default: 3)')
     parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST)')
     parser.add_argument('--posts-per-day', type=int, default=8, help='Number of posts per day for bulk upload scheduling (default: 8)')
+    parser.add_argument('--start-word', type=str, help='Specify the starting word for the first game (overrides random/chain for first game only)')
     
     args = parser.parse_args()
 
@@ -397,9 +516,12 @@ def main():
             part_number = args.start_part + i
             print(f"\n=== Starting video creation for Part {part_number} ===")
             
-            # For the first game, use no start word (random). For subsequent games, use the last guess from the previous game if chaining is enabled (default).
+            # For the first game, use --start-word if provided, else use chain/random logic
             start_word = None
-            if not args.no_chain_games and i > 0 and previous_game_dir:
+            if i == 0 and args.start_word:
+                start_word = args.start_word
+                print(f"First game - using user-specified starting word: '{start_word}'")
+            elif not args.no_chain_games and i > 0 and previous_game_dir:
                 start_word = extract_last_guess_from_game(previous_game_dir)
                 if start_word:
                     print(f"Using last guess from previous game as starting word: '{start_word}'")
@@ -467,6 +589,24 @@ def main():
                 except Exception as e:
                     print(f"GitHub upload failed: {e}")
                     github_result = None
+                if not github_result or not github_result.get('download_url'):
+                    print("❌ GitHub video upload failed. Stopping script. No CSV row will be written for this video.")
+                    sys.exit(2)
+                # Upload thumbnail to GitHub Releases
+                thumbnail_url = ''
+                try:
+                    videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
+                    thumbnail_name = f"the_worlds_longest_game_of_pictionary_part_{part_number}_thumbnail.png"
+                    thumbnail_path = os.path.join(videos_dir, thumbnail_name)
+                    if os.path.exists(thumbnail_path):
+                        thumbnail_result = upload_image_to_github_release(thumbnail_path, part_number=part_number)
+                        if thumbnail_result and thumbnail_result.get('download_url'):
+                            thumbnail_url = thumbnail_result['download_url']
+                    else:
+                        print(f"Thumbnail not found at {thumbnail_path}, skipping upload.")
+                except Exception as e:
+                    print(f"GitHub thumbnail upload failed: {e}")
+                    thumbnail_url = ''
                 
                 if github_result and github_result.get('download_url'):
                     print(f"✓ GitHub: {github_result['download_url']}")
@@ -517,7 +657,7 @@ def main():
                         'Post Type': 'SHORTS',
                         'Video Title': f"The World's Longest Game of Pictionary Part {part_number}",
                         'Video URL': github_result['download_url'],
-                        'Thumbnail URL': '',
+                        'Thumbnail URL': thumbnail_url,
                         'Subtitles URL': '',
                         'Subtitles Language': '',
                         'Subtitles Auto-Sync': '',
