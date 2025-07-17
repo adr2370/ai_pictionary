@@ -382,9 +382,15 @@ def create_title_text(draw, font_path, part_number=None, bottom_padding=120):
     if part_number is not None:
         base_title += f" Part {part_number}"
     
+    # Use a smaller font for triple-digit part numbers
+    if part_number is not None and int(part_number) >= 100:
+        title_font_size = 110
+    else:
+        title_font_size = 120
+    
     title_font_path = font_path if font_path else get_default_font(bold=True)
     try:
-        title_font = ImageFont.truetype(title_font_path, 120) if title_font_path else ImageFont.load_default()
+        title_font = ImageFont.truetype(title_font_path, title_font_size) if title_font_path else ImageFont.load_default()
     except Exception:
         title_font = ImageFont.load_default()
     
