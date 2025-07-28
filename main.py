@@ -268,6 +268,9 @@ def upload_to_github_release(video_path, part_number=None):
     if not GITHUB_AVAILABLE:
         print("GitHub uploader not available. Skipping GitHub upload.")
         return None
+    import time
+    import requests
+    from requests.exceptions import Timeout, ConnectionError
     try:
         token, repo = get_github_config()
         video_name = os.path.basename(video_path)
@@ -277,7 +280,8 @@ def upload_to_github_release(video_path, part_number=None):
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json'
         }
-        r = requests.get(release_url, headers=headers)
+        REQUEST_TIMEOUT = (10, 300)  # (connect, read) in seconds
+        r = requests.get(release_url, headers=headers, timeout=REQUEST_TIMEOUT)
         if r.status_code == 404:
             create_url = f"https://api.github.com/repos/{repo}/releases"
             data = {
@@ -287,7 +291,7 @@ def upload_to_github_release(video_path, part_number=None):
                 'draft': False,
                 'prerelease': False
             }
-            r = requests.post(create_url, headers=headers, json=data)
+            r = requests.post(create_url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
             release = r.json()
         else:
@@ -299,7 +303,7 @@ def upload_to_github_release(video_path, part_number=None):
         page = 1
         while True:
             paged_url = assets_url + f'?per_page=100&page={page}'
-            resp = requests.get(paged_url, headers=headers)
+            resp = requests.get(paged_url, headers=headers, timeout=REQUEST_TIMEOUT)
             assets = resp.json()
             if not isinstance(assets, list) or not assets:
                 break
@@ -313,7 +317,11 @@ def upload_to_github_release(video_path, part_number=None):
             if asset['name'] == video_name:
                 print(f"⚠️ Asset {video_name} already exists. Deleting before upload...")
                 delete_url = asset['url']
-                del_resp = requests.delete(delete_url, headers=headers)
+                try:
+                    del_resp = requests.delete(delete_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                except (Timeout, ConnectionError) as e:
+                    print(f"❌ Timeout or connection error during asset deletion: {e}")
+                    continue
                 if del_resp.status_code == 204:
                     print(f"✅ Deleted existing asset: {video_name}")
                     deleted_any = True
@@ -323,33 +331,67 @@ def upload_to_github_release(video_path, part_number=None):
         if deleted_any:
             time.sleep(2)
             # Re-fetch asset list for debug
-            resp = requests.get(assets_url + '?per_page=100', headers=headers)
+            resp = requests.get(assets_url + '?per_page=100', headers=headers, timeout=REQUEST_TIMEOUT)
             print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
-        # Upload asset
-        with open(video_path, 'rb') as f:
-            upload_headers = headers.copy()
-            upload_headers['Content-Type'] = 'video/mp4'
-            params = {'name': video_name}
-            upload_resp = requests.post(
-                upload_url,
-                headers=upload_headers,
-                params=params,
-                data=f
-            )
-        try:
-            upload_resp.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            print(f"GitHub upload failed: {e}")
-            print(f"GitHub response: {upload_resp.text}")
-            if upload_resp.status_code == 422:
-                print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
-            raise
-        asset = upload_resp.json()
-        print(f"✅ Uploaded to GitHub Releases: {asset['browser_download_url']}")
-        return {
-            'name': video_name,
-            'download_url': asset['browser_download_url']
-        }
+        # Upload asset with robust retry logic
+        max_upload_retries = 1000
+        max_backoff = 600  # 10 minutes
+        for attempt in range(max_upload_retries):
+            try:
+                with open(video_path, 'rb') as f:
+                    upload_headers = headers.copy()
+                    upload_headers['Content-Type'] = 'video/mp4'
+                    params = {'name': video_name}
+                    upload_resp = requests.post(
+                        upload_url,
+                        headers=upload_headers,
+                        params=params,
+                        data=f,
+                        timeout=REQUEST_TIMEOUT
+                    )
+                if upload_resp.status_code >= 500 or upload_resp.status_code == 429:
+                    # Server error or rate limit, retry
+                    raise requests.exceptions.HTTPError(f"Server error or rate limit: {upload_resp.status_code}")
+                if upload_resp.status_code >= 400 and upload_resp.status_code not in (422, 429):
+                    # Unrecoverable client error (auth, bad request, etc.)
+                    print(f"❌ Unrecoverable error: {upload_resp.status_code} {upload_resp.text}")
+                    return None
+                upload_resp.raise_for_status()
+                asset = upload_resp.json()
+                print(f"✅ Uploaded to GitHub Releases: {asset['browser_download_url']}")
+                return {
+                    'name': video_name,
+                    'download_url': asset['browser_download_url']
+                }
+            except (Timeout, ConnectionError) as e:
+                wait_time = min(2 ** attempt, max_backoff)
+                print(f"GitHub upload attempt {attempt+1} failed due to timeout/connection error: {e}")
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+            except requests.exceptions.HTTPError as e:
+                if upload_resp.status_code in (429, 500, 502, 503, 504):
+                    wait_time = min(2 ** attempt, max_backoff)
+                    print(f"GitHub upload attempt {attempt+1} failed due to HTTP error: {e}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                elif upload_resp.status_code == 422:
+                    print(f"GitHub upload failed: {e}")
+                    print(f"GitHub response: {upload_resp.text}")
+                    print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
+                    return None
+                else:
+                    print(f"❌ Unrecoverable HTTP error: {upload_resp.status_code} {upload_resp.text}")
+                    return None
+            except Exception as e:
+                print(f"GitHub upload failed: {e}")
+                wait_time = min(2 ** attempt, max_backoff)
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+        print(f"❌ GitHub upload failed after {max_upload_retries} attempts.")
+        return None
     except Exception as e:
         print(f"GitHub upload failed: {e}")
         return None
@@ -361,6 +403,9 @@ def upload_image_to_github_release(image_path, part_number=None):
     if not GITHUB_AVAILABLE:
         print("GitHub uploader not available. Skipping GitHub upload.")
         return None
+    import time
+    import requests
+    from requests.exceptions import Timeout, ConnectionError
     try:
         token, repo = get_github_config()
         image_name = os.path.basename(image_path)
@@ -370,7 +415,8 @@ def upload_image_to_github_release(image_path, part_number=None):
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json'
         }
-        r = requests.get(release_url, headers=headers)
+        REQUEST_TIMEOUT = (10, 300)
+        r = requests.get(release_url, headers=headers, timeout=REQUEST_TIMEOUT)
         if r.status_code == 404:
             create_url = f"https://api.github.com/repos/{repo}/releases"
             data = {
@@ -380,7 +426,7 @@ def upload_image_to_github_release(image_path, part_number=None):
                 'draft': False,
                 'prerelease': False
             }
-            r = requests.post(create_url, headers=headers, json=data)
+            r = requests.post(create_url, headers=headers, json=data, timeout=REQUEST_TIMEOUT)
             r.raise_for_status()
             release = r.json()
         else:
@@ -392,7 +438,7 @@ def upload_image_to_github_release(image_path, part_number=None):
         page = 1
         while True:
             paged_url = assets_url + f'?per_page=100&page={page}'
-            resp = requests.get(paged_url, headers=headers)
+            resp = requests.get(paged_url, headers=headers, timeout=REQUEST_TIMEOUT)
             assets = resp.json()
             if not isinstance(assets, list) or not assets:
                 break
@@ -406,7 +452,11 @@ def upload_image_to_github_release(image_path, part_number=None):
             if asset['name'] == image_name:
                 print(f"⚠️ Thumbnail {image_name} already exists. Deleting before upload...")
                 delete_url = asset['url']
-                del_resp = requests.delete(delete_url, headers=headers)
+                try:
+                    del_resp = requests.delete(delete_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                except (Timeout, ConnectionError) as e:
+                    print(f"❌ Timeout or connection error during thumbnail deletion: {e}")
+                    continue
                 if del_resp.status_code == 204:
                     print(f"✅ Deleted existing thumbnail: {image_name}")
                     deleted_any = True
@@ -416,32 +466,67 @@ def upload_image_to_github_release(image_path, part_number=None):
         if deleted_any:
             time.sleep(2)
             # Re-fetch asset list for debug
-            resp = requests.get(assets_url + '?per_page=100', headers=headers)
+            resp = requests.get(assets_url + '?per_page=100', headers=headers, timeout=REQUEST_TIMEOUT)
             print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
-        with open(image_path, 'rb') as f:
-            upload_headers = headers.copy()
-            upload_headers['Content-Type'] = 'image/png'
-            params = {'name': image_name}
-            upload_resp = requests.post(
-                upload_url,
-                headers=upload_headers,
-                params=params,
-                data=f
-            )
-        try:
-            upload_resp.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            print(f"GitHub thumbnail upload failed: {e}")
-            print(f"GitHub response: {upload_resp.text}")
-            if upload_resp.status_code == 422:
-                print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
-            raise
-        asset = upload_resp.json()
-        print(f"✅ Uploaded thumbnail to GitHub Releases: {asset['browser_download_url']}")
-        return {
-            'name': image_name,
-            'download_url': asset['browser_download_url']
-        }
+        # Upload asset with robust retry logic
+        max_upload_retries = 1000
+        max_backoff = 600  # 10 minutes
+        for attempt in range(max_upload_retries):
+            try:
+                with open(image_path, 'rb') as f:
+                    upload_headers = headers.copy()
+                    upload_headers['Content-Type'] = 'image/png'
+                    params = {'name': image_name}
+                    upload_resp = requests.post(
+                        upload_url,
+                        headers=upload_headers,
+                        params=params,
+                        data=f,
+                        timeout=REQUEST_TIMEOUT
+                    )
+                if upload_resp.status_code >= 500 or upload_resp.status_code == 429:
+                    # Server error or rate limit, retry
+                    raise requests.exceptions.HTTPError(f"Server error or rate limit: {upload_resp.status_code}")
+                if upload_resp.status_code >= 400 and upload_resp.status_code not in (422, 429):
+                    # Unrecoverable client error (auth, bad request, etc.)
+                    print(f"❌ Unrecoverable error: {upload_resp.status_code} {upload_resp.text}")
+                    return None
+                upload_resp.raise_for_status()
+                asset = upload_resp.json()
+                print(f"✅ Uploaded thumbnail to GitHub Releases: {asset['browser_download_url']}")
+                return {
+                    'name': image_name,
+                    'download_url': asset['browser_download_url']
+                }
+            except (Timeout, ConnectionError) as e:
+                wait_time = min(2 ** attempt, max_backoff)
+                print(f"GitHub thumbnail upload attempt {attempt+1} failed due to timeout/connection error: {e}")
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+            except requests.exceptions.HTTPError as e:
+                if upload_resp.status_code in (429, 500, 502, 503, 504):
+                    wait_time = min(2 ** attempt, max_backoff)
+                    print(f"GitHub thumbnail upload attempt {attempt+1} failed due to HTTP error: {e}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                elif upload_resp.status_code == 422:
+                    print(f"GitHub thumbnail upload failed: {e}")
+                    print(f"GitHub response: {upload_resp.text}")
+                    print("❌ 422 Unprocessable Entity: This usually means the asset already exists, the file is too large, or the upload parameters are invalid.")
+                    return None
+                else:
+                    print(f"❌ Unrecoverable HTTP error: {upload_resp.status_code} {upload_resp.text}")
+                    return None
+            except Exception as e:
+                print(f"GitHub thumbnail upload failed: {e}")
+                wait_time = min(2 ** attempt, max_backoff)
+                print(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+        print(f"❌ GitHub thumbnail upload failed after {max_upload_retries} attempts.")
+        return None
     except Exception as e:
         print(f"GitHub thumbnail upload failed: {e}")
         return None
