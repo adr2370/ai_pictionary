@@ -69,7 +69,7 @@
   },
   "9": {
     "inputs": {
-      "text": "color, colored, shading, shadows, gradient, black fill, solid black areas, filled shapes, black patches, dark shading, heavy black sections, thick black areas, filled regions, messy lines, thick lines, detailed shading, watercolor, painting, realistic, photorealistic, blurry, low quality, artifacts, noise, complex background, cluttered, busy, ornate, decorative, textured background, gray background, colored background, yellow, orange, red, blue, green, purple, any color, colored beak, colored feet, solid fill, color fill, filled areas, dark fill, green fill, orange fill, yellow fill",
+      "text": "color, colored, shading, shadows, gradient, black fill, solid black areas, filled shapes, black patches, dark shading, heavy black sections, thick black areas, filled regions, messy lines, thick lines, detailed shading, watercolor, painting, realistic, photorealistic, blurry, low quality, artifacts, noise, complex background, cluttered, busy, ornate, decorative, textured background, gray background, colored background, yellow, orange, red, blue, green, purple, any color, colored beak, colored feet, solid fill, color fill, filled areas, dark fill, green fill, orange fill, yellow fill, circle",
       "clip": ["10", 1]
     },
     "class_type": "CLIPTextEncode",
