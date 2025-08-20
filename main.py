@@ -311,7 +311,6 @@ def upload_to_github_release(video_path, part_number=None):
             if len(assets) < 100:
                 break
             page += 1
-        print(f"Assets before deletion: {[a['name'] for a in all_assets]}")
         deleted_any = False
         for asset in all_assets:
             if asset['name'] == video_name:
@@ -332,7 +331,6 @@ def upload_to_github_release(video_path, part_number=None):
             time.sleep(2)
             # Re-fetch asset list for debug
             resp = requests.get(assets_url + '?per_page=100', headers=headers, timeout=REQUEST_TIMEOUT)
-            print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
         # Upload asset with robust retry logic
         max_upload_retries = 1000
         max_backoff = 600  # 10 minutes
@@ -446,7 +444,6 @@ def upload_image_to_github_release(image_path, part_number=None):
             if len(assets) < 100:
                 break
             page += 1
-        print(f"Assets before deletion: {[a['name'] for a in all_assets]}")
         deleted_any = False
         for asset in all_assets:
             if asset['name'] == image_name:
@@ -467,7 +464,6 @@ def upload_image_to_github_release(image_path, part_number=None):
             time.sleep(2)
             # Re-fetch asset list for debug
             resp = requests.get(assets_url + '?per_page=100', headers=headers, timeout=REQUEST_TIMEOUT)
-            print(f"Assets after deletion: {[a['name'] for a in resp.json()]}")
         # Upload asset with robust retry logic
         max_upload_retries = 1000
         max_backoff = 600  # 10 minutes

@@ -172,16 +172,82 @@ class FrameGenerationConfig:
         return total_height + BOTTOM_PADDING
     
     def _estimate_text_height(self, text, font_size=140):
-        """Estimate text height for layout calculation"""
+        """Estimate text height for layout calculation
+        
+        This function now uses the same adaptive font sizing logic as _create_text_element
+        to ensure accurate height calculations when font size is reduced.
+        """
         # Use the same logic as _create_text_element for accurate estimation
         font_path = self.font_path if self.font_path else get_default_font(bold=True)
+        
+        # Start with the provided font size and reduce if needed
+        current_font_size = font_size
+        max_width = VIDEO_WIDTH - 80
+        min_font_size = 60  # Minimum font size to prevent text from becoming too small
+        
+        # Try to find the best font size that fits the text
+        while current_font_size >= min_font_size:
+            try:
+                font = ImageFont.truetype(font_path, current_font_size) if font_path else ImageFont.load_default()
+            except Exception:
+                font = ImageFont.load_default()
+            
+            # Test if this font size works
+            dummy_img = Image.new('RGBA', (VIDEO_WIDTH, 10), (0,0,0,0))
+            draw = ImageDraw.Draw(dummy_img)
+            
+            # Wrap text with current font size
+            words = text.split()
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + (" " if current_line else "") + word
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                w = bbox[2] - bbox[0]
+                if w > max_width and current_line:
+                    lines.append(current_line)
+                    current_line = word
+                else:
+                    current_line = test_line
+            if current_line:
+                lines.append(current_line)
+            
+            # Check if this font size results in too many lines OR if any single line is too wide
+            max_lines = 4  # Maximum number of lines we want to allow
+            max_line_width = VIDEO_WIDTH - 200  # Maximum width for any single line (more aggressive margin)
+            
+            # Check if the full text (before wrapping) is too wide
+            full_text_bbox = draw.textbbox((0, 0), text, font=font)
+            full_text_width = full_text_bbox[2] - full_text_bbox[0]
+            full_text_too_wide = full_text_width > max_line_width
+            
+            # Check if any individual line is too wide
+            line_too_wide = False
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font)
+                w = bbox[2] - bbox[0]
+                if w > max_line_width:
+                    line_too_wide = True
+                    break
+            
+            if len(lines) <= max_lines and not line_too_wide and not full_text_too_wide:
+                # This font size works, break out of the loop
+                break
+            
+            # Reduce font size and try again
+            current_font_size -= 10
+        
+        # Ensure we don't go below minimum
+        current_font_size = max(current_font_size, min_font_size)
+        
+        # Create final font with the determined size
         try:
-            font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+            font = ImageFont.truetype(font_path, current_font_size) if font_path else ImageFont.load_default()
         except Exception:
             font = ImageFont.load_default()
         
-        # Wrap text (same logic as _create_text_element)
-        max_width = VIDEO_WIDTH - 80
+        # Re-wrap text with final font size
         words = text.split()
         lines = []
         current_line = ""
@@ -200,7 +266,7 @@ class FrameGenerationConfig:
         if current_line:
             lines.append(current_line)
         
-        # Calculate total height (same as _create_text_element)
+        # Calculate total height (same as _create_text_element) - HEIGHT ESTIMATION FUNCTION
         bbox = draw.textbbox((0, 0), 'A', font=font)
         line_height = (bbox[3] - bbox[1]) + 10
         EXTRA_BOTTOM_PADDING = 30
@@ -241,15 +307,82 @@ class FrameGenerationConfig:
         return processed
     
     def _create_text_element(self, text, font_size=140):
-        """Create a text element with proper sizing and wrapping"""
+        """Create a text element with proper sizing and wrapping
+        
+        This function now automatically reduces font size when text is too long
+        to prevent text from being cut off or extending beyond video boundaries.
+        It tries to keep text within 4 lines maximum by reducing font size as needed.
+        """
         font_path = self.font_path if self.font_path else get_default_font(bold=True)
+        
+        # Start with the provided font size and reduce if needed
+        current_font_size = font_size
+        max_width = VIDEO_WIDTH - 80
+        min_font_size = 60  # Minimum font size to prevent text from becoming too small
+        
+        # Try to find the best font size that fits the text
+        while current_font_size >= min_font_size:
+            try:
+                font = ImageFont.truetype(font_path, current_font_size) if font_path else ImageFont.load_default()
+            except Exception:
+                font = ImageFont.load_default()
+            
+            # Test if this font size works
+            dummy_img = Image.new('RGBA', (VIDEO_WIDTH, 10), (0,0,0,0))
+            draw = ImageDraw.Draw(dummy_img)
+            
+            # Wrap text with current font size
+            words = text.split()
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                test_line = current_line + (" " if current_line else "") + word
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                w = bbox[2] - bbox[0]
+                if w > max_width and current_line:
+                    lines.append(current_line)
+                    current_line = word
+                else:
+                    current_line = test_line
+            if current_line:
+                lines.append(current_line)
+            
+            # Check if this font size results in too many lines OR if any single line is too wide
+            max_lines = 4  # Maximum number of lines we want to allow
+            max_line_width = VIDEO_WIDTH - 200  # Maximum width for any single line (more aggressive margin)
+            
+            # Check if the full text (before wrapping) is too wide
+            full_text_bbox = draw.textbbox((0, 0), text, font=font)
+            full_text_width = full_text_bbox[2] - full_text_bbox[0]
+            full_text_too_wide = full_text_width > max_line_width
+            
+            # Check if any individual line is too wide
+            line_too_wide = False
+            for line in lines:
+                bbox = draw.textbbox((0, 0), line, font=font)
+                w = bbox[2] - bbox[0]
+                if w > max_line_width:
+                    line_too_wide = True
+                    break
+            
+            if len(lines) <= max_lines and not line_too_wide and not full_text_too_wide:
+                # This font size works, break out of the loop
+                break
+            
+            # Reduce font size and try again
+            current_font_size -= 10
+        
+        # Ensure we don't go below minimum
+        current_font_size = max(current_font_size, min_font_size)
+        
+        # Create final font with the determined size
         try:
-            font = ImageFont.truetype(font_path, font_size) if font_path else ImageFont.load_default()
+            font = ImageFont.truetype(font_path, current_font_size) if font_path else ImageFont.load_default()
         except Exception:
             font = ImageFont.load_default()
         
-        # Wrap text
-        max_width = VIDEO_WIDTH - 80
+        # Re-wrap text with final font size
         words = text.split()
         lines = []
         current_line = ""
