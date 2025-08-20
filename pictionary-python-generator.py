@@ -1161,24 +1161,22 @@ def main():
     # Generate frames in parallel
     print("Starting parallel frame generation...")
     start_time = time.time()
-    
+
+    # Generate all frames normally (including frame 0 as title frame)
     generate_frames_parallel(config, num_processes=args.processes)
-    
-    # --- THUMBNAIL EXTRACTION ---
+
+    # --- THUMBNAIL EXTRACTION AND FRAME 0 REPLACEMENT ---
+    # After generating all frames, extract the thumbnail and replace frame 0
+    print("Replacing first frame with thumbnail...")
+
     # The title is shown for the first N frames (title_duration_frames)
     # We'll use the last title frame as the thumbnail
     last_title_frame_num = config.title_duration_frames - 1
     last_title_frame_path = f"temp_frames/frame_{last_title_frame_num:05d}.png"
     if os.path.exists(last_title_frame_path):
-        # Save thumbnail to videos directory
-        videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
-        os.makedirs(videos_dir, exist_ok=True)
-        part_number = args.part if args.part is not None else 'unknown'
-        thumbnail_name = f"the_worlds_longest_game_of_pictionary_part_{part_number}_thumbnail.png"
-        thumbnail_path = os.path.join(videos_dir, thumbnail_name)
-        import shutil
-        shutil.copyfile(last_title_frame_path, thumbnail_path)
-        print(f"Thumbnail saved to: {thumbnail_path}")
+        # Replace frame 0 with the thumbnail frame
+        shutil.copyfile(last_title_frame_path, "temp_frames/frame_00000.png")
+        print("Frame 0 replaced with thumbnail")
     else:
         print(f"Warning: Could not find title frame for thumbnail at {last_title_frame_path}")
     # --- END THUMBNAIL EXTRACTION ---
