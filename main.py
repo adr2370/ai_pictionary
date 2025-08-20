@@ -713,8 +713,14 @@ def main():
                             csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
                             csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
                             print(f"📅 Scheduling first video {args.hours_ahead} hours ahead: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
-                        csv_filename = f'ai_pictionary_bulk_upload_{csv_start_time.strftime("%Y%m%d_%H%M%S")}.csv'
-                        csv_filepath = os.path.join(csv_folder, csv_filename)
+                        
+                        # Create two CSV files - one for SHORTS and one for VIDEO
+                        timestamp = csv_start_time.strftime("%Y%m%d_%H%M%S")
+                        csv_filename_shorts = f'ai_pictionary_bulk_upload_SHORTS_{timestamp}.csv'
+                        csv_filename_video = f'ai_pictionary_bulk_upload_VIDEO_{timestamp}.csv'
+                        csv_filepath_shorts = os.path.join(csv_folder, csv_filename_shorts)
+                        csv_filepath_video = os.path.join(csv_folder, csv_filename_video)
+                        
                         headers = [
                             'Labels', 'Text', 'Year', 'Month (1 to 12)', 'Date', 'Hour (From 0 to 23)',
                             'Minutes', 'Queue Schedule', 'Post Type', 'Video Title', 'Video URL',
@@ -722,10 +728,19 @@ def main():
                             'Privacy Status', 'Category', 'Playlist', 'Tags', 'License', 'Embeddable',
                             'Notify Subscribers', 'Made For Kids'
                         ]
-                        with open(csv_filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                        
+                        # Create SHORTS CSV file
+                        with open(csv_filepath_shorts, 'w', newline='', encoding='utf-8') as csvfile:
+                            writer = csv.DictWriter(csvfile, fieldnames=headers)
+                            writer.writeheader()
+                        
+                        # Create VIDEO CSV file
+                        with open(csv_filepath_video, 'w', newline='', encoding='utf-8') as csvfile:
                             writer = csv.DictWriter(csvfile, fieldnames=headers)
                             writer.writeheader()
                     video_time = csv_start_time + timedelta(hours=(part_number - args.start_part) * interval_hours)
+                    
+                    # Create row data
                     row = {
                         'Labels': f'Part {part_number}',
                         'Text': f"The World's Longest Game of Pictionary Part {part_number}. This is the future. We're doomed. #AI #Pictionary #Comedy #ArtificialIntelligence",
@@ -751,10 +766,22 @@ def main():
                         'Notify Subscribers': 'NO',
                         'Made For Kids': 'NO'
                     }
-                    with open(csv_filepath, 'a', newline='', encoding='utf-8') as csvfile:
+                    
+                    # Add row to SHORTS CSV with SHORTS post type
+                    row_shorts = row.copy()
+                    row_shorts['Post Type'] = 'SHORTS'
+                    with open(csv_filepath_shorts, 'a', newline='', encoding='utf-8') as csvfile:
                         writer = csv.DictWriter(csvfile, fieldnames=headers)
-                        writer.writerow(row)
-                    print(f"💾 Added to CSV: {csv_filepath}")
+                        writer.writerow(row_shorts)
+                    
+                    # Add row to VIDEO CSV with VIDEO post type
+                    row_video = row.copy()
+                    row_video['Post Type'] = 'VIDEO'
+                    with open(csv_filepath_video, 'a', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=headers)
+                        writer.writerow(row_video)
+                    
+                    print(f"💾 Added to CSV files: {csv_filename_shorts} and {csv_filename_video}")
                 else:
                     print("✗ GitHub: Upload failed or no download URL returned. Skipping CSV row for this video.")
             
@@ -773,14 +800,15 @@ def main():
                 print(f"\nProceeding to next video immediately (no uploads enabled)")
                 
         # Final CSV summary
-        if 'csv_filepath' in locals():
+        if 'csv_filepath_shorts' in locals():
             print(f"\n✅ Final CSV Summary:")
-            print(f"📁 CSV file: {csv_filepath}")
-            print(f"📊 Total videos in CSV: {part_number - args.start_part + 1}")
+            print(f"📁 SHORTS CSV file: {csv_filename_shorts}")
+            print(f"📁 VIDEO CSV file: {csv_filename_video}")
+            print(f"📊 Total videos in each CSV: {part_number - args.start_part + 1}")
             print(f"📅 Start time: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
             print(f"📅 End time: {(csv_start_time + timedelta(hours=(part_number - args.start_part) * interval_hours)).strftime('%Y-%m-%d %H:%M %Z')}")
             print(f"⏰ Schedule: {posts_per_day} videos per day, every {interval_hours:.2f} hours")
-            print(f"📁 CSV saved in: bulk_upload_csvs/")
+            print(f"📁 CSV files saved in: bulk_upload_csvs/")
             
     except Exception as e:
         print(f"Error: {e}")
