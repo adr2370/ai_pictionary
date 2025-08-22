@@ -417,7 +417,7 @@ async function startComfyUI() {
     // Check if ComfyUI directory exists
     if (!fs.existsSync(COMFYUI_DIR)) {
       throw new Error(
-        `ComfyUI directory not found at ${COMFYUI_DIR}. Please make sure ComfyUI is installed in the ComfyUI subdirectory.`
+        `ComfyUI directory not found at ${COMFYUI_DIR}. Please make sure ComfyUI is installed in the ComfyUI subdirectory.`,
       );
     }
 
@@ -425,7 +425,7 @@ async function startComfyUI() {
     const mainPyPath = path.join(COMFYUI_DIR, "main.py");
     if (!fs.existsSync(mainPyPath)) {
       throw new Error(
-        `ComfyUI main.py not found at ${mainPyPath}. Please make sure ComfyUI is properly installed.`
+        `ComfyUI main.py not found at ${mainPyPath}. Please make sure ComfyUI is properly installed.`,
       );
     }
 
@@ -443,7 +443,7 @@ async function startComfyUI() {
         pythonPath = altPythonPath;
       } catch (altError) {
         throw new Error(
-          `Python not found. Please make sure Python is installed and available in your PATH.`
+          `Python not found. Please make sure Python is installed and available in your PATH.`,
         );
       }
     }
@@ -544,7 +544,7 @@ async function stopComfyUI() {
       } catch (killError) {
         console.log(
           "Process kill error (might already be dead):",
-          killError.message
+          killError.message,
         );
       }
 
@@ -605,7 +605,7 @@ async function startOllama() {
       await exec(`${ollamaPath} --version`);
     } catch (error) {
       throw new Error(
-        `Ollama not found. Please make sure Ollama is installed and available in your PATH.`
+        `Ollama not found. Please make sure Ollama is installed and available in your PATH.`,
       );
     }
 
@@ -704,7 +704,7 @@ async function stopOllama() {
       } catch (killError) {
         console.log(
           "Process kill error (might already be dead):",
-          killError.message
+          killError.message,
         );
       }
 
@@ -775,11 +775,11 @@ function loadWorkflowTemplate() {
   // You'll need to create this file using ComfyUI and export it
   const templatePath = path.join(
     __dirname,
-    "pictionary_workflow_template.json"
+    "pictionary_workflow_template.json",
   );
   if (!fs.existsSync(templatePath)) {
     throw new Error(
-      `Workflow template not found at ${templatePath}. You need to create a ComfyUI workflow and save it as JSON.`
+      `Workflow template not found at ${templatePath}. You need to create a ComfyUI workflow and save it as JSON.`,
     );
   }
   return JSON.parse(fs.readFileSync(templatePath, "utf8"));
@@ -819,7 +819,7 @@ async function generateImage(prompt, roundNumber) {
       await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
 
       const historyResponse = await axios.get(
-        `${COMFYUI_API_URL}/history/${promptId}`
+        `${COMFYUI_API_URL}/history/${promptId}`,
       );
       if (
         historyResponse.data &&
@@ -848,14 +848,14 @@ async function generateImage(prompt, roundNumber) {
       `${COMFYUI_API_URL}/view?filename=${imageFilename}`,
       {
         responseType: "arraybuffer",
-      }
+      },
     );
 
     // Save the image to a file
     const sanitizedPrompt = prompt.replace(/[^a-z0-9]/gi, "_").toLowerCase();
     const localImagePath = path.join(
       GAME_DIR,
-      `round_${roundNumber}_${sanitizedPrompt}.png`
+      `round_${roundNumber}_${sanitizedPrompt}.png`,
     );
     fs.writeFileSync(localImagePath, Buffer.from(imageResponse.data));
 
@@ -880,7 +880,7 @@ function encodeImage(imagePath) {
 async function getPlausibleWrongGuess(
   imagePath,
   actualWord,
-  recentCorrectGuesses = 0
+  recentCorrectGuesses = 0,
 ) {
   try {
     console.log("Analyzing image locally with Ollama...");
@@ -908,7 +908,7 @@ async function getPlausibleWrongGuess(
         headers: {
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     let guess = response.data.response.trim();
@@ -922,17 +922,17 @@ async function getPlausibleWrongGuess(
 
       if (allowCorrectGuess) {
         console.log(
-          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`
+          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`,
         );
         logToFile(
-          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`
+          `Model guessed correctly: "${guess}". Allowing this correct guess (30% chance).`,
         );
       } else {
         console.log(
-          `Model guessed correctly: "${guess}". Asking for a different guess...`
+          `Model guessed correctly: "${guess}". Asking for a different guess...`,
         );
         logToFile(
-          `Model guessed correctly: "${guess}". Asking for a different guess...`
+          `Model guessed correctly: "${guess}". Asking for a different guess...`,
         );
 
         // Second attempt - now tell it the correct answer and ask for something else
@@ -955,7 +955,7 @@ async function getPlausibleWrongGuess(
             headers: {
               "Content-Type": "application/json",
             },
-          }
+          },
         );
 
         guess = retryResponse.data.response.trim();
@@ -1098,10 +1098,10 @@ async function runGame(numRounds = 10, startWord = null) {
       const imagePath = await generateImage(currentWord, round);
       if (!imagePath) {
         console.error(
-          `Failed to generate image for round ${round}. Stopping game.`
+          `Failed to generate image for round ${round}. Stopping game.`,
         );
         logToFile(
-          `Failed to generate image for round ${round}. Stopping game.`
+          `Failed to generate image for round ${round}. Stopping game.`,
         );
         break;
       }
@@ -1110,10 +1110,10 @@ async function runGame(numRounds = 10, startWord = null) {
       const wrongGuess = await getPlausibleWrongGuess(imagePath, currentWord);
       if (!wrongGuess) {
         console.error(
-          `Failed to get a wrong guess for round ${round}. Stopping game.`
+          `Failed to get a wrong guess for round ${round}. Stopping game.`,
         );
         logToFile(
-          `Failed to get a wrong guess for round ${round}. Stopping game.`
+          `Failed to get a wrong guess for round ${round}. Stopping game.`,
         );
         break;
       }
@@ -1139,7 +1139,7 @@ async function runGame(numRounds = 10, startWord = null) {
           `Actual Word: ${currentWord}\n` +
           `Image File: ${path.basename(imagePath)}\n` +
           `AI's Guess: ${wrongGuess}\n` +
-          `Was Correct: ${isCorrectGuess}\n`
+          `Was Correct: ${isCorrectGuess}\n`,
       );
 
       // Set up for the next round
@@ -1173,7 +1173,7 @@ async function runGame(numRounds = 10, startWord = null) {
     } catch (stopError) {
       console.error(
         "Error stopping Ollama after game error:",
-        stopError.message
+        stopError.message,
       );
     }
 
@@ -1183,7 +1183,7 @@ async function runGame(numRounds = 10, startWord = null) {
     } catch (stopError) {
       console.error(
         "Error stopping ComfyUI after game error:",
-        stopError.message
+        stopError.message,
       );
     }
 
@@ -1223,31 +1223,101 @@ runGame(10, customStartWord)
     console.error("Failed to run game:", error);
   });
 
-// Function to ensure the Ollama model is available
-async function loadOllamaModel() {
-  try {
-    console.log(`Ensuring Ollama model ${MODEL_NAME} is available...`);
-    logToFile(`Ensuring Ollama model ${MODEL_NAME} is available...`);
+// Function to ensure the Ollama model is available with retry logic
+async function loadOllamaModel(maxRetries = 5, baseDelay = 2000) {
+  console.log(`Trying to load model: ${MODEL_NAME}`);
+  logToFile(`Trying to load model: ${MODEL_NAME}`);
 
-    const response = await axios.post(
-      `${OLLAMA_BASE_URL}/api/pull`,
-      {
-        name: MODEL_NAME,
-        stream: false,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(
+        `Attempt ${attempt}/${maxRetries} to load model ${MODEL_NAME}...`,
+      );
+      logToFile(
+        `Attempt ${attempt}/${maxRetries} to load model ${MODEL_NAME}...`,
+      );
+
+      // First check if the model is already available
+      try {
+        const statusResponse = await axios.get(`${OLLAMA_BASE_URL}/api/tags`);
+        const availableModels = statusResponse.data.models.map((m) => m.name);
+
+        if (availableModels.includes(MODEL_NAME)) {
+          console.log(`Model ${MODEL_NAME} is already available!`);
+          logToFile(`Model ${MODEL_NAME} is already available!`);
+          return true;
+        }
+      } catch (statusError) {
+        console.log("Could not check model status, proceeding with pull...");
+        logToFile("Could not check model status, proceeding with pull...");
       }
-    );
 
-    console.log(`Model ${MODEL_NAME} is available and ready to use`);
-    logToFile(`Model ${MODEL_NAME} is available and ready to use`);
-    return true;
-  } catch (error) {
-    console.error("Error ensuring Ollama model availability:", error.message);
-    logToFile(`Error ensuring Ollama model availability: ${error.message}`);
-    return false;
+      // Try to pull the model
+      const response = await axios.post(
+        `${OLLAMA_BASE_URL}/api/pull`,
+        {
+          name: MODEL_NAME,
+          stream: false,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+          timeout: 30000, // 30 second timeout
+        },
+      );
+
+      console.log(`Model ${MODEL_NAME} is available and ready to use`);
+      logToFile(`Model ${MODEL_NAME} is available and ready to use`);
+      return true;
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries;
+      const errorMessage = error.response
+        ? `HTTP ${error.response.status}: ${error.response.statusText}`
+        : error.message;
+
+      console.error(
+        `Attempt ${attempt}/${maxRetries} failed for ${MODEL_NAME}: ${errorMessage}`,
+      );
+      logToFile(
+        `Attempt ${attempt}/${maxRetries} failed for ${MODEL_NAME}: ${errorMessage}`,
+      );
+
+      // Log detailed error information
+      if (error.response) {
+        console.error(`Response status: ${error.response.status}`);
+        console.error(`Response data:`, error.response.data);
+        logToFile(`Response status: ${error.response.status}`);
+        logToFile(`Response data: ${JSON.stringify(error.response.data)}`);
+      }
+
+      // If this is the last attempt, return false
+      if (isLastAttempt) {
+        console.error(
+          `Failed to load model ${MODEL_NAME} after ${maxRetries} attempts.`,
+        );
+        logToFile(
+          `Failed to load model ${MODEL_NAME} after ${maxRetries} attempts.`,
+        );
+        return false;
+      }
+
+      // Calculate delay with exponential backoff
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      const jitter = Math.random() * 1000; // Add up to 1 second of random jitter
+      const totalDelay = delay + jitter;
+
+      console.log(
+        `Waiting ${Math.round(totalDelay / 1000)} seconds before retry...`,
+      );
+      logToFile(
+        `Waiting ${Math.round(totalDelay / 1000)} seconds before retry...`,
+      );
+
+      // Wait before retrying
+      await new Promise((resolve) => setTimeout(resolve, totalDelay));
+    }
   }
+
+  return false;
 }
