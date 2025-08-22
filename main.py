@@ -280,8 +280,26 @@ def upload_to_github_release(video_path, part_number=None):
             'Authorization': f'token {token}',
             'Accept': 'application/vnd.github.v3+json'
         }
-        REQUEST_TIMEOUT = (10, 300)  # (connect, read) in seconds
-        r = requests.get(release_url, headers=headers, timeout=REQUEST_TIMEOUT)
+        REQUEST_TIMEOUT = (120, 300)  # (connect, read) in seconds - increased connect timeout even further
+        # Create a session for better connection handling
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Retry initial connection with exponential backoff
+        max_initial_retries = 3
+        for attempt in range(max_initial_retries):
+            try:
+                print(f"🔗 Attempting to connect to GitHub API (attempt {attempt + 1}/{max_initial_retries})...")
+                r = session.get(release_url, timeout=REQUEST_TIMEOUT)
+                break
+            except (Timeout, ConnectionError) as e:
+                if attempt < max_initial_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"⚠️ Connection failed: {e}. Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"❌ Failed to connect to GitHub API after {max_initial_retries} attempts: {e}")
+                    raise
         if r.status_code == 404:
             create_url = f"https://api.github.com/repos/{repo}/releases"
             data = {
@@ -301,36 +319,99 @@ def upload_to_github_release(video_path, part_number=None):
         # Paginate through all assets
         all_assets = []
         page = 1
-        while True:
-            paged_url = assets_url + f'?per_page=100&page={page}'
-            resp = requests.get(paged_url, headers=headers, timeout=REQUEST_TIMEOUT)
-            assets = resp.json()
-            if not isinstance(assets, list) or not assets:
+        max_pages = 20  # Limit pagination to prevent infinite loops
+        while page <= max_pages:
+            try:
+                paged_url = assets_url + f'?per_page=100&page={page}'
+                print(f"📄 Fetching assets page {page}...")
+                # Use longer timeout for pagination requests that might be slow
+                pagination_timeout = (60, 120)  # (connect, read) - shorter timeouts for pagination
+                resp = session.get(paged_url, timeout=pagination_timeout)
+                resp.raise_for_status()
+                assets = resp.json()
+                if not isinstance(assets, list) or not assets:
+                    break
+                all_assets.extend(assets)
+                print(f"📄 Found {len(assets)} assets on page {page}")
+                if len(assets) < 100:
+                    break
+                page += 1
+            except (Timeout, ConnectionError) as e:
+                print(f"⚠️ Timeout/connection error on page {page}: {e}")
+                print(f"📄 Continuing with {len(all_assets)} assets found so far...")
                 break
-            all_assets.extend(assets)
-            if len(assets) < 100:
+            except Exception as e:
+                print(f"⚠️ Error fetching page {page}: {e}")
+                print(f"📄 Continuing with {len(all_assets)} assets found so far...")
                 break
-            page += 1
+        # Clean up old videos and handle duplicates
+        print(f"🔍 Analyzing {len(all_assets)} assets for cleanup...")
         deleted_any = False
+        videos_to_delete = []
+        
+        # First pass: identify videos to delete
         for asset in all_assets:
-            if asset['name'] == video_name:
+            asset_name = asset['name']
+            
+            # Check for exact duplicate
+            if asset_name == video_name:
                 print(f"⚠️ Asset {video_name} already exists. Deleting before upload...")
+                videos_to_delete.append(asset)
+                deleted_any = True
+                continue
+            
+            # Check if it's a video file and extract part number
+            if asset_name.endswith('.mp4'):
+                match = re.search(r'part_(\d+)\.mp4$', asset_name)
+                if match and part_number:
+                    try:
+                        asset_part = int(match.group(1))
+                        current_part = int(part_number)
+                        
+                        # Delete videos that are more than 900 parts earlier
+                        if asset_part < (current_part - 900):
+                            print(f"🗑️  Marking old video for deletion: {asset_name} (part {asset_part}, current: {current_part})")
+                            videos_to_delete.append(asset)
+                            deleted_any = True
+                    except (ValueError, TypeError) as e:
+                        print(f"⚠️  Could not parse part number from {asset_name}: {e}")
+                        continue
+        
+        # Show summary of what will be deleted
+        if videos_to_delete:
+            print(f"📋 Cleanup summary:")
+            print(f"   - Videos to delete: {len(videos_to_delete)}")
+            if part_number:
+                print(f"   - Keeping videos from part {max(1, int(part_number) - 900)} onwards")
+            print(f"   - Total assets before cleanup: {len(all_assets)}")
+        
+        # Second pass: actually delete the identified videos
+        if videos_to_delete:
+            print(f"🧹 Cleaning up {len(videos_to_delete)} old/duplicate videos...")
+            for asset in videos_to_delete:
                 delete_url = asset['url']
                 try:
-                    del_resp = requests.delete(delete_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                    del_resp = session.delete(delete_url, timeout=REQUEST_TIMEOUT)
                 except (Timeout, ConnectionError) as e:
                     print(f"❌ Timeout or connection error during asset deletion: {e}")
                     continue
                 if del_resp.status_code == 204:
-                    print(f"✅ Deleted existing asset: {video_name}")
-                    deleted_any = True
+                    print(f"✅ Deleted asset: {asset['name']}")
                 else:
-                    print(f"❌ Failed to delete existing asset: {video_name}. Status: {del_resp.status_code}, Response: {del_resp.text}")
-                    raise Exception(f"Failed to delete existing asset: {video_name}")
+                    print(f"❌ Failed to delete asset: {asset['name']}. Status: {del_resp.status_code}, Response: {del_resp.text}")
+                    # Don't raise exception here, continue with cleanup
+        
         if deleted_any:
             time.sleep(2)
-            # Re-fetch asset list for debug
-            resp = requests.get(assets_url + '?per_page=100', headers=headers, timeout=REQUEST_TIMEOUT)
+            # Re-fetch asset list for debug and show remaining count
+            try:
+                resp = session.get(assets_url + '?per_page=100', timeout=REQUEST_TIMEOUT)
+                if resp.status_code == 200:
+                    remaining_assets = resp.json()
+                    if isinstance(remaining_assets, list):
+                        print(f"📊 After cleanup: {len(remaining_assets)} assets remain in release")
+            except Exception as e:
+                print(f"⚠️  Could not fetch updated asset count: {e}")
         # Upload asset with robust retry logic
         max_upload_retries = 1000
         max_backoff = 600  # 10 minutes
@@ -340,7 +421,7 @@ def upload_to_github_release(video_path, part_number=None):
                     upload_headers = headers.copy()
                     upload_headers['Content-Type'] = 'video/mp4'
                     params = {'name': video_name}
-                    upload_resp = requests.post(
+                    upload_resp = session.post(
                         upload_url,
                         headers=upload_headers,
                         params=params,
@@ -434,16 +515,29 @@ def upload_image_to_github_release(image_path, part_number=None):
         # Paginate through all assets
         all_assets = []
         page = 1
-        while True:
-            paged_url = assets_url + f'?per_page=100&page={page}'
-            resp = requests.get(paged_url, headers=headers, timeout=REQUEST_TIMEOUT)
-            assets = resp.json()
-            if not isinstance(assets, list) or not assets:
+        max_pages = 20  # Limit pagination to prevent infinite loops
+        while page <= max_pages:
+            try:
+                paged_url = assets_url + f'?per_page=100&page={page}'
+                print(f"📄 Fetching thumbnail assets page {page}...")
+                resp = requests.get(paged_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                resp.raise_for_status()
+                assets = resp.json()
+                if not isinstance(assets, list) or not assets:
+                    break
+                all_assets.extend(assets)
+                print(f"📄 Found {len(assets)} thumbnail assets on page {page}")
+                if len(assets) < 100:
+                    break
+                page += 1
+            except (Timeout, ConnectionError) as e:
+                print(f"⚠️ Timeout/connection error on thumbnail page {page}: {e}")
+                print(f"📄 Continuing with {len(all_assets)} thumbnail assets found so far...")
                 break
-            all_assets.extend(assets)
-            if len(assets) < 100:
+            except Exception as e:
+                print(f"⚠️ Error fetching thumbnail page {page}: {e}")
+                print(f"📄 Continuing with {len(all_assets)} thumbnail assets found so far...")
                 break
-            page += 1
         deleted_any = False
         for asset in all_assets:
             if asset['name'] == image_name:
