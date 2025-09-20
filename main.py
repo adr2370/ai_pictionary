@@ -30,6 +30,15 @@ except ImportError:
     print("Warning: requests not available. Install requests to enable GitHub uploads.")
     GITHUB_AVAILABLE = False
 
+# Import S3 uploader
+try:
+    import boto3
+    from botocore.exceptions import NoCredentialsError, ClientError
+    S3_AVAILABLE = True
+except ImportError:
+    print("Warning: boto3 not available. Install boto3 to enable S3 uploads.")
+    S3_AVAILABLE = False
+
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
 VIDEO_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-python-generator.py')
@@ -549,7 +558,7 @@ def upload_image_to_github_release(image_path, part_number=None):
                     print(f"❌ Timeout or connection error during thumbnail deletion: {e}")
                     continue
                 if del_resp.status_code == 204:
-                    print(f"✅ Deleted existing thumbnail: {image_name}")
+                    print(f"Deleted existing thumbnail: {image_name}")
                     deleted_any = True
                 else:
                     print(f"❌ Failed to delete existing thumbnail: {image_name}. Status: {del_resp.status_code}, Response: {del_resp.text}")
@@ -622,6 +631,120 @@ def upload_image_to_github_release(image_path, part_number=None):
         return None
 
 
+def upload_to_s3(video_path, part_number=None, bucket_name='ai-pictionary-videos-adr2370'):
+    """Upload a video to AWS S3 and return the direct .mp4 URL."""
+    print(f"[4c/5] Uploading video to S3 (Part {part_number})...")
+    if not S3_AVAILABLE:
+        print("S3 uploader not available. Skipping S3 upload.")
+        return None
+
+    try:
+        # Initialize S3 client
+        s3_client = boto3.client('s3')
+
+        video_name = os.path.basename(video_path)
+        s3_key = f"videos/{video_name}"
+
+        # Check if file already exists and delete it
+        try:
+            s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+            print(f"Video {video_name} already exists in S3. Replacing...")
+            s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+            print(f"Deleted existing video: {video_name}")
+        except ClientError as e:
+            if e.response['Error']['Code'] != '404':
+                print(f"Error checking existing file: {e}")
+
+        # Upload the video (bucket policy makes it publicly accessible)
+        print(f"Uploading {video_name} to S3...")
+        s3_client.upload_file(
+            video_path,
+            bucket_name,
+            s3_key,
+            ExtraArgs={'ContentType': 'video/mp4'}
+        )
+
+        # Generate the public URL using the correct regional endpoint
+        region = s3_client.meta.region_name or 'us-east-1'
+        if region == 'us-east-1':
+            download_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+        else:
+            download_url = f"https://{bucket_name}.s3-{region}.amazonaws.com/{s3_key}"
+        print(f"Uploaded to S3: {download_url}")
+
+        return {
+            'name': video_name,
+            'download_url': download_url
+        }
+
+    except NoCredentialsError:
+        print("AWS credentials not found. Please run 'aws configure' first.")
+        return None
+    except ClientError as e:
+        print(f"AWS S3 error: {e}")
+        return None
+    except Exception as e:
+        print(f"S3 upload failed: {e}")
+        return None
+
+
+def upload_image_to_s3(image_path, part_number=None, bucket_name='ai-pictionary-videos-adr2370'):
+    """Upload a PNG image to AWS S3 and return the direct .png URL."""
+    print(f"[4d/5] Uploading thumbnail to S3 (Part {part_number})...")
+    if not S3_AVAILABLE:
+        print("S3 uploader not available. Skipping S3 upload.")
+        return None
+
+    try:
+        # Initialize S3 client
+        s3_client = boto3.client('s3')
+
+        image_name = os.path.basename(image_path)
+        s3_key = f"thumbnails/{image_name}"
+
+        # Check if file already exists and delete it
+        try:
+            s3_client.head_object(Bucket=bucket_name, Key=s3_key)
+            print(f"Thumbnail {image_name} already exists in S3. Replacing...")
+            s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
+            print(f"Deleted existing thumbnail: {image_name}")
+        except ClientError as e:
+            if e.response['Error']['Code'] != '404':
+                print(f"Error checking existing thumbnail: {e}")
+
+        # Upload the image (bucket policy makes it publicly accessible)
+        print(f"Uploading {image_name} to S3...")
+        s3_client.upload_file(
+            image_path,
+            bucket_name,
+            s3_key,
+            ExtraArgs={'ContentType': 'image/png'}
+        )
+
+        # Generate the public URL using the correct regional endpoint
+        region = s3_client.meta.region_name or 'us-east-1'
+        if region == 'us-east-1':
+            download_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+        else:
+            download_url = f"https://{bucket_name}.s3-{region}.amazonaws.com/{s3_key}"
+        print(f"Uploaded thumbnail to S3: {download_url}")
+
+        return {
+            'name': image_name,
+            'download_url': download_url
+        }
+
+    except NoCredentialsError:
+        print("AWS credentials not found. Please run 'aws configure' first.")
+        return None
+    except ClientError as e:
+        print(f"AWS S3 error: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ S3 thumbnail upload failed: {e}")
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Orchestrate AI Pictionary game, video generation, and social media uploads.")
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the upload steps.')
@@ -647,7 +770,13 @@ def main():
     parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST)')
     parser.add_argument('--posts-per-day', type=int, default=8, help='Number of posts per day for bulk upload scheduling (default: 8)')
     parser.add_argument('--start-word', type=str, help='Specify the starting word for the first game (overrides random/chain for first game only)')
-    
+
+    # Storage backend options
+    parser.add_argument('--storage-backend', choices=['s3', 'github'], default='s3',
+                       help='Storage backend for videos and thumbnails (default: s3)')
+    parser.add_argument('--s3-bucket', default='ai-pictionary-videos-adr2370',
+                       help='S3 bucket name for video storage (default: ai-pictionary-videos-adr2370)')
+
     args = parser.parse_args()
 
     # Load TikTok configuration
@@ -718,7 +847,6 @@ def main():
                 # Track upload results
                 youtube_result = None
                 tiktok_result = None
-                github_result = None
                 
                 # Upload to YouTube (only if explicitly requested)
                 if args.upload_youtube:
@@ -758,34 +886,48 @@ def main():
                 else:
                     print("TikTok upload skipped (use --upload-tiktok to enable)")
                 
-                # Upload to GitHub Releases (enabled by default)
-                try:
-                    github_result = upload_to_github_release(video_path, part_number=part_number)
-                except Exception as e:
-                    print(f"GitHub upload failed: {e}")
-                    github_result = None
-                if not github_result or not github_result.get('download_url'):
-                    print("❌ GitHub video upload failed. Stopping script. No CSV row will be written for this video.")
+                # Upload to selected storage backend (S3 by default, GitHub optional)
+                storage_result = None
+                if args.storage_backend == 's3':
+                    try:
+                        storage_result = upload_to_s3(video_path, part_number=part_number, bucket_name=args.s3_bucket)
+                    except Exception as e:
+                        print(f"S3 upload failed: {e}")
+                        storage_result = None
+                elif args.storage_backend == 'github':
+                    try:
+                        storage_result = upload_to_github_release(video_path, part_number=part_number)
+                    except Exception as e:
+                        print(f"GitHub upload failed: {e}")
+                        storage_result = None
+
+                if not storage_result or not storage_result.get('download_url'):
+                    print(f"❌ {args.storage_backend.upper()} video upload failed. Stopping script. No CSV row will be written for this video.")
                     sys.exit(2)
-                # Upload thumbnail to GitHub Releases
+
+                # Upload thumbnail to selected storage backend
                 thumbnail_url = ''
                 try:
                     videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
                     thumbnail_name = f"the_worlds_longest_game_of_pictionary_part_{part_number}_thumbnail.png"
                     thumbnail_path = os.path.join(videos_dir, thumbnail_name)
                     if os.path.exists(thumbnail_path):
-                        thumbnail_result = upload_image_to_github_release(thumbnail_path, part_number=part_number)
+                        if args.storage_backend == 's3':
+                            thumbnail_result = upload_image_to_s3(thumbnail_path, part_number=part_number, bucket_name=args.s3_bucket)
+                        elif args.storage_backend == 'github':
+                            thumbnail_result = upload_image_to_github_release(thumbnail_path, part_number=part_number)
+
                         if thumbnail_result and thumbnail_result.get('download_url'):
                             thumbnail_url = thumbnail_result['download_url']
                     else:
                         print(f"Thumbnail not found at {thumbnail_path}, skipping upload.")
                 except Exception as e:
-                    print(f"GitHub thumbnail upload failed: {e}")
+                    print(f"{args.storage_backend.upper()} thumbnail upload failed: {e}")
                     thumbnail_url = ''
                 
-                if github_result and github_result.get('download_url'):
-                    print(f"✓ GitHub: {github_result['download_url']}")
-                    # CSV logic (same as before, but use github_result['download_url'])
+                if storage_result and storage_result.get('download_url'):
+                    print(f"✓ {args.storage_backend.upper()}: {storage_result['download_url']}")
+                    # CSV logic (same as before, but use storage_result['download_url'])
                     import csv
                     from datetime import datetime, timedelta
                     import pytz
@@ -799,10 +941,8 @@ def main():
                                 csv_start_time = pst.localize(csv_start_time)
                                 print(f"📅 Using custom start time: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
                             except ValueError:
-                                print(f"❌ Invalid start time format: {args.start_time}. Use YYYY-MM-DD HH:MM")
-                                print(f"📅 Falling back to {args.hours_ahead} hours ahead")
-                                csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
-                                csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
+                                print(f"Invalid start time format: {args.start_time}. Use YYYY-MM-DD HH:MM")
+                                sys.exit(1)
                         else:
                             csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
                             csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
@@ -846,7 +986,7 @@ def main():
                         'Queue Schedule': '',
                         'Post Type': 'SHORTS',
                         'Video Title': f"The World's Longest Game of Pictionary Part {part_number}",
-                        'Video URL': github_result['download_url'],
+                        'Video URL': storage_result['download_url'],
                         'Thumbnail URL': thumbnail_url,
                         'Subtitles URL': '',
                         'Subtitles Language': '',
@@ -877,7 +1017,7 @@ def main():
                     
                     print(f"💾 Added to CSV files: {csv_filename_shorts} and {csv_filename_video}")
                 else:
-                    print("✗ GitHub: Upload failed or no download URL returned. Skipping CSV row for this video.")
+                    print(f"✗ {args.storage_backend.upper()}: Upload failed or no download URL returned. Skipping CSV row for this video.")
             
             print(f"All steps completed for Part {part_number}.")
             
