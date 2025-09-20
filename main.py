@@ -81,6 +81,65 @@ def extract_last_guess_from_game(game_dir):
         return None
 
 
+def get_highest_part_number():
+    """Find the highest part number from existing videos."""
+    try:
+        videos_dir = os.path.join(os.path.dirname(__file__), 'videos')
+        if not os.path.exists(videos_dir):
+            return 0
+
+        video_files = glob.glob(os.path.join(videos_dir, 'the_worlds_longest_game_of_pictionary_part_*.mp4'))
+        if not video_files:
+            return 0
+
+        part_numbers = []
+        for video_file in video_files:
+            match = re.search(r'part_(\d+)\.mp4$', os.path.basename(video_file))
+            if match:
+                part_numbers.append(int(match.group(1)))
+
+        return max(part_numbers) if part_numbers else 0
+    except Exception as e:
+        print(f"Error finding highest part number: {e}")
+        return 0
+
+
+def get_latest_game_dir():
+    """Find the most recent game directory."""
+    try:
+        if not os.path.exists(GAMES_DIR):
+            return None
+
+        game_dirs = [d for d in glob.glob(os.path.join(GAMES_DIR, 'pictionary_game_*')) if os.path.isdir(d)]
+        if not game_dirs:
+            return None
+
+        return max(game_dirs, key=os.path.getmtime)
+    except Exception as e:
+        print(f"Error finding latest game directory: {e}")
+        return None
+
+
+def calculate_start_time_from_part(part_number):
+    """Calculate start time based on part number using the pattern: part 1041 = Sept 20 midnight."""
+    from datetime import datetime, timedelta
+    import pytz
+
+    # Reference: part 1041 = Sept 20, 2025 at midnight PST
+    reference_part = 1041
+    reference_date = datetime(2025, 9, 20, 0, 0, 0)
+
+    pst = pytz.timezone('US/Pacific')
+    reference_date = pst.localize(reference_date)
+
+    # Calculate days difference (each day = 20 parts based on 20 posts per day)
+    parts_per_day = 20
+    days_difference = (part_number - reference_part) / parts_per_day
+
+    calculated_date = reference_date + timedelta(days=days_difference)
+    return calculated_date
+
+
 def run_js_game(start_word=None):
     print("[1/4] Running Pictionary game (Node.js)...")
     cmd = ['node', NODE_GAME_SCRIPT]
@@ -746,30 +805,40 @@ def upload_image_to_s3(image_path, part_number=None, bucket_name='ai-pictionary-
 
 
 def main():
+    # Calculate dynamic defaults
+    highest_part = get_highest_part_number()
+    default_start_part = highest_part + 1 if highest_part > 0 else 1
+
+    # Get latest game for start word default
+    latest_game_dir = get_latest_game_dir()
+    default_start_word = None
+    if latest_game_dir:
+        default_start_word = extract_last_guess_from_game(latest_game_dir)
+
     parser = argparse.ArgumentParser(description="Orchestrate AI Pictionary game, video generation, and social media uploads.")
     parser.add_argument('--dry-run', action='store_true', help='Run everything except the upload steps.')
-    parser.add_argument('--count', type=int, default=1, help='Number of videos to create in a row (default: 1)')
-    parser.add_argument('--start-part', type=int, default=1, help='Part number to start on (default: 1)')
+    parser.add_argument('--count', type=int, default=300, help='Number of videos to create in a row (default: 300)')
+    parser.add_argument('--start-part', type=int, default=default_start_part, help=f'Part number to start on (default: {default_start_part})')
     parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads and retries (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
     parser.add_argument('--no-chain-games', action='store_true', help='Disable chaining - each game starts with a random word instead of using the last guess from the previous game')
-    
+
     # YouTube options
     parser.add_argument('--upload-youtube', action='store_true', help='Upload to YouTube (disabled by default)')
-    
+
     # TikTok options
     parser.add_argument('--upload-tiktok', action='store_true', help='Upload to TikTok (disabled by default)')
     parser.add_argument('--tiktok-config', default='tiktok_config.json', help='TikTok configuration file (default: tiktok_config.json)')
     parser.add_argument('--tiktok-client-key', help='TikTok app client key (overrides config file)')
     parser.add_argument('--tiktok-client-secret', help='TikTok app client secret (overrides config file)')
-    parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'], 
+    parser.add_argument('--tiktok-privacy', choices=['PUBLIC_TO_EVERYONE', 'MUTUAL_FOLLOW_FRIENDS', 'SELF_ONLY'],
                        help='TikTok video privacy level (overrides config file)')
-    
+
     # CSV scheduling options
     parser.add_argument('--hours-ahead', type=int, default=3, help='Hours ahead of now to schedule the first video (default: 3)')
-    parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST)')
-    parser.add_argument('--posts-per-day', type=int, default=8, help='Number of posts per day for bulk upload scheduling (default: 8)')
-    parser.add_argument('--start-word', type=str, help='Specify the starting word for the first game (overrides random/chain for first game only)')
+    parser.add_argument('--start-time', help='Exact start time for first video (format: YYYY-MM-DD HH:MM, timezone: PST). Auto-calculated from part number if not specified.')
+    parser.add_argument('--posts-per-day', type=int, default=20, help='Number of posts per day for bulk upload scheduling (default: 20)')
+    parser.add_argument('--start-word', type=str, default=default_start_word, help=f'Specify the starting word for the first game (default: auto-detected from latest game: "{default_start_word}")')
 
     # Storage backend options
     parser.add_argument('--storage-backend', choices=['s3', 'github'], default='s3',
@@ -820,11 +889,11 @@ def main():
             part_number = args.start_part + i
             print(f"\n=== Starting video creation for Part {part_number} ===")
             
-            # For the first game, use --start-word if provided, else use chain/random logic
+            # For the first game, use --start-word if provided, else use auto-detected/chain/random logic
             start_word = None
             if i == 0 and args.start_word:
                 start_word = args.start_word
-                print(f"First game - using user-specified starting word: '{start_word}'")
+                print(f"First game - using starting word: '{start_word}'")
             elif not args.no_chain_games and i > 0 and previous_game_dir:
                 start_word = extract_last_guess_from_game(previous_game_dir)
                 if start_word:
@@ -832,7 +901,11 @@ def main():
                 else:
                     print("Could not extract last guess from previous game, using random word")
             elif not args.no_chain_games and i == 0:
-                print("First game in chain - using random starting word")
+                if args.start_word:
+                    start_word = args.start_word
+                    print(f"First game in chain - using auto-detected starting word: '{start_word}'")
+                else:
+                    print("First game in chain - using random starting word")
             elif args.no_chain_games:
                 print("Chain mode disabled - each game starts with a random word")
             
@@ -944,9 +1017,9 @@ def main():
                                 print(f"Invalid start time format: {args.start_time}. Use YYYY-MM-DD HH:MM")
                                 sys.exit(1)
                         else:
-                            csv_start_time = datetime.now(pst) + timedelta(hours=args.hours_ahead)
-                            csv_start_time = csv_start_time.replace(minute=0, second=0, microsecond=0)
-                            print(f"📅 Scheduling first video {args.hours_ahead} hours ahead: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
+                            # Auto-calculate start time based on part number
+                            csv_start_time = calculate_start_time_from_part(args.start_part)
+                            print(f"📅 Auto-calculated start time for part {args.start_part}: {csv_start_time.strftime('%Y-%m-%d %H:%M %Z')}")
                         
                         # Create two CSV files - one for SHORTS and one for VIDEO
                         timestamp = csv_start_time.strftime("%Y%m%d_%H%M%S")
