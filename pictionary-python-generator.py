@@ -1029,7 +1029,8 @@ def read_game_log(game_dir):
     # First, collect all files and organize them by round number
     for file in os.listdir(game_dir):
         if file.startswith("round_") and file.endswith(".png"):
-            round_num = int(file.split("_")[1])
+            # Handle new format: round_1.png (extract number before .png)
+            round_num = int(file.split("_")[1].split(".")[0])
             if round_num not in round_files:
                 round_files[round_num] = {}
             round_files[round_num]["image"] = os.path.join(game_dir, file)

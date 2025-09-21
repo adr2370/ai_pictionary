@@ -852,10 +852,9 @@ async function generateImage(prompt, roundNumber) {
     );
 
     // Save the image to a file
-    const sanitizedPrompt = prompt.replace(/[^a-z0-9]/gi, "_").toLowerCase();
     const localImagePath = path.join(
       GAME_DIR,
-      `round_${roundNumber}_${sanitizedPrompt}.png`,
+      `round_${roundNumber}.png`,
     );
     fs.writeFileSync(localImagePath, Buffer.from(imageResponse.data));
 
