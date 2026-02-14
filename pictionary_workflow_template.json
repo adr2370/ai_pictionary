@@ -80,8 +80,8 @@
   "10": {
     "inputs": {
       "lora_name": "quickdraw_sketch.safetensors",
-      "strength_model": 1.0000000000000002,
-      "strength_clip": 1.0000000000000002,
+      "strength_model": 0.7,
+      "strength_clip": 0.7,
       "model": ["8", 0],
       "clip": ["8", 1]
     },

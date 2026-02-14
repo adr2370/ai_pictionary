@@ -8,7 +8,7 @@
  * @returns {string} - The formatted prompt for the image generation model
  */
 function getPictionaryPrompt(prompt) {
-  return `(${prompt}:1.3), simple line drawing, minimalist sketch, clean black lines only, (white background:1.2), monochrome, black and white only, centered composition, single object, clear outline`;
+  return `(${prompt}:1.3), quickdraw, simple line drawing, minimalist sketch, clean black lines only, (white background:1.2), monochrome, black and white only, centered composition, single object, clear outline`;
 }
 
 module.exports = {
