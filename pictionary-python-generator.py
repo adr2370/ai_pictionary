@@ -6,7 +6,6 @@ import sys
 import datetime
 import re
 import random
-from collections import deque
 import tempfile
 import shutil
 import multiprocessing as mp
