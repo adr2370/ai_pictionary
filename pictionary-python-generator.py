@@ -44,7 +44,18 @@ class FrameGenerationConfig:
         self.drawing_phase = drawing_phase
         self.title_duration_frames = title_duration_frames
         self.part_number = part_number
-        
+
+        # Load paper texture for background
+        texture_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets', 'paper_texture.png')
+        if os.path.exists(texture_path):
+            self.paper_texture = Image.open(texture_path).convert('RGB')
+            self.texture_height = self.paper_texture.height
+            print(f"Loaded paper texture: {self.paper_texture.size}")
+        else:
+            self.paper_texture = None
+            self.texture_height = 0
+            print("Warning: Paper texture not found, using plain white background")
+
         # Pre-calculate all scroll states for each frame
         self.scroll_states = self._calculate_scroll_states()
         
@@ -305,7 +316,21 @@ class FrameGenerationConfig:
                     processed[f'strokes_{i}'] = []
         
         return processed
-    
+
+    def get_background_frame(self, scroll_y):
+        """Get the paper texture background for the current scroll position."""
+        if self.paper_texture is None:
+            return Image.new('RGB', (VIDEO_WIDTH, VIDEO_HEIGHT), BACKGROUND_COLOR)
+
+        bg = Image.new('RGB', (VIDEO_WIDTH, VIDEO_HEIGHT), BACKGROUND_COLOR)
+        # Tile the texture vertically based on scroll position
+        texture_y_offset = int(scroll_y) % self.texture_height
+        y = -texture_y_offset
+        while y < VIDEO_HEIGHT:
+            bg.paste(self.paper_texture, (0, y))
+            y += self.texture_height
+        return bg
+
     def _create_text_element(self, text, font_size=140):
         """Create a text element with proper sizing and wrapping
         
@@ -568,7 +593,7 @@ def create_loading_indicator(frame, font_path, mode='analyzing'):
     LEFT_MARGIN = 60
     PATTERN_LEN = 8
     
-    loading_img = Image.new('RGBA', (VIDEO_WIDTH, LOADING_HEIGHT), (255, 255, 255, 255))
+    loading_img = Image.new('RGBA', (VIDEO_WIDTH, LOADING_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(loading_img)
     
     random.seed(frame // 6)
@@ -631,19 +656,20 @@ def generate_single_frame(frame_info):
     frame_num, config = frame_info
     
     try:
-        image = Image.new('RGB', (VIDEO_WIDTH, VIDEO_HEIGHT), BACKGROUND_COLOR)
-        draw = ImageDraw.Draw(image)
-        
-        # Show title for first 3 seconds
-        if frame_num < config.title_duration_frames:
-            create_title_text(draw, config.font_path, part_number=config.part_number, bottom_padding=120)
-        
         # Calculate round and progress
         current_round = frame_num // config.frames_per_round
         frame_in_round = frame_num % config.frames_per_round
-        
+
         # Get pre-calculated scroll position
         current_scroll = config.scroll_states[frame_num]
+
+        # Create background with paper texture
+        image = config.get_background_frame(current_scroll)
+        draw = ImageDraw.Draw(image)
+
+        # Show title for first 3 seconds
+        if frame_num < config.title_duration_frames:
+            create_title_text(draw, config.font_path, part_number=config.part_number, bottom_padding=120)
         
         # Build visible elements
         visible_elements = []
