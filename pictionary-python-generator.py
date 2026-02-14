@@ -593,7 +593,7 @@ def create_loading_indicator(frame, font_path, mode='analyzing'):
     loading_img = Image.new('RGBA', (VIDEO_WIDTH, LOADING_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(loading_img)
     
-    random.seed(frame // 6)
+    random.seed(frame // 4)
     pattern = ''.join(random.choices(chars, k=PATTERN_LEN))
     
     text_prefix = "Generating: [" if mode == 'generating' else "Analyzing: ["
