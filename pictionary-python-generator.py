@@ -14,6 +14,8 @@ from functools import partial
 import concurrent.futures
 import json
 import time
+import cv2
+import numpy as np
 
 # Constants
 VIDEO_WIDTH = 1080  # Vertical video width
@@ -453,49 +455,44 @@ class FrameGenerationConfig:
         return img.resize((new_width, new_height), Image.Resampling.LANCZOS)
     
     def _extract_black_strokes(self, image, threshold=80):
-        """Extract black strokes from image for animation"""
-        gray = image.convert('L')
-        pixels = gray.load()
-        width, height = image.size
-        visited = [[False] * height for _ in range(width)]
-        strokes = []
+        """Extract contour-based strokes from image for animation using OpenCV."""
+        # Convert PIL image to numpy array for OpenCV
+        img_array = np.array(image.convert('L'))
 
-        for y in range(height):
-            for x in range(width):
-                if not visited[x][y] and pixels[x, y] < threshold:
-                    stroke = []
-                    queue = deque()
-                    queue.append((x, y))
-                    visited[x][y] = True
-                    while queue:
-                        cx, cy = queue.popleft()
-                        stroke.append((cx, cy))
-                        # Check 8 neighbors
-                        for dx in [-1, 0, 1]:
-                            for dy in [-1, 0, 1]:
-                                if dx == 0 and dy == 0:
-                                    continue
-                                nx, ny = cx + dx, cy + dy
-                                if (0 <= nx < width and 0 <= ny < height and
-                                    not visited[nx][ny] and pixels[nx, ny] < threshold):
-                                    visited[nx][ny] = True
-                                    queue.append((nx, ny))
-                    strokes.append(stroke)
-        
-        # Sort by length and prepare timings
-        strokes.sort(key=len, reverse=True)
+        # Threshold to binary (invert so black strokes are white)
+        _, binary = cv2.threshold(img_array, threshold, 255, cv2.THRESH_BINARY_INV)
+
+        # Find contours
+        contours, _ = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+
+        if not contours:
+            return []
+
+        # Sort contours: largest first (main shapes), then smaller details
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+        # Filter out tiny noise contours (less than 10 pixels)
+        contours = [c for c in contours if len(c) >= 10]
+
+        if not contours:
+            return []
+
+        # Prepare stroke timings with staggered starts
         stroke_timings = []
-        if len(strokes) > 1:
-            for i, stroke in enumerate(strokes):
-                start = i / len(strokes)
-                end = 1.0
-                if i % 2 == 1:
-                    stroke = list(reversed(stroke))
-                stroke_timings.append((stroke, start, end))
-        else:
-            if strokes:
-                stroke_timings.append((strokes[0], 0.0, 1.0))
-        
+        for i, contour in enumerate(contours):
+            # Convert contour points to list of (x, y) tuples
+            points = [(int(pt[0][0]), int(pt[0][1])) for pt in contour]
+
+            # Stagger start times: larger strokes start earlier
+            start = i / len(contours) * 0.5  # First half of animation starts all strokes
+            end = 1.0
+
+            # Alternate direction for visual variety
+            if i % 2 == 1:
+                points = list(reversed(points))
+
+            stroke_timings.append((points, start, end))
+
         return stroke_timings
 
 def get_default_font(bold=False):
@@ -625,30 +622,38 @@ def create_loading_indicator(frame, font_path, mode='analyzing'):
     return loading_img
 
 def create_drawing_animation(strokes, progress):
-    """Create animated drawing effect"""
+    """Create animated drawing effect using contour-based paths."""
     if not strokes:
         return Image.new('RGBA', (VIDEO_WIDTH, 400), (0, 0, 0, 0))
-    
-    # Get image size from first stroke
-    if strokes:
-        max_x = max(max(x for x, y in stroke) for stroke, _, _ in strokes)
-        max_y = max(max(y for x, y in stroke) for stroke, _, _ in strokes)
-        result = Image.new('RGBA', (max_x + 1, max_y + 1), (0, 0, 0, 0))
-    else:
-        result = Image.new('RGBA', (VIDEO_WIDTH, 400), (0, 0, 0, 0))
-    
-    for stroke, start, end in strokes:
+
+    # Get image size from stroke bounds
+    max_x = max(max(x for x, y in points) for points, _, _ in strokes)
+    max_y = max(max(y for x, y in points) for points, _, _ in strokes)
+    width = max_x + 1
+    height = max_y + 1
+
+    # Create numpy array for OpenCV drawing (much faster than putpixel)
+    result_array = np.zeros((height, width, 4), dtype=np.uint8)
+
+    LINE_THICKNESS = 3  # Pen-like line width
+
+    for points, start, end in strokes:
         if progress >= end:
-            for x, y in stroke:
-                if 0 <= x < result.width and 0 <= y < result.height:
-                    result.putpixel((x, y), (0, 0, 0, 255))
+            # Draw complete contour
+            pts = np.array(points, dtype=np.int32).reshape(-1, 1, 2)
+            cv2.drawContours(result_array, [pts], -1, (0, 0, 0, 255), LINE_THICKNESS)
         elif progress > start:
+            # Draw partial contour based on progress
             local_progress = (progress - start) / (end - start)
-            reveal_count = int(len(stroke) * local_progress)
-            for x, y in stroke[:reveal_count]:
-                if 0 <= x < result.width and 0 <= y < result.height:
-                    result.putpixel((x, y), (0, 0, 0, 255))
-    
+            reveal_count = max(2, int(len(points) * local_progress))
+            partial_points = points[:reveal_count]
+            if len(partial_points) >= 2:
+                pts = np.array(partial_points, dtype=np.int32)
+                cv2.polylines(result_array, [pts], isClosed=False,
+                              color=(0, 0, 0, 255), thickness=LINE_THICKNESS)
+
+    # Convert numpy array back to PIL Image
+    result = Image.fromarray(result_array, 'RGBA')
     return result
 
 def generate_single_frame(frame_info):
