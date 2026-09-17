@@ -885,9 +885,17 @@ def create_video(output_file="pictionary_chain.mp4", fps=30, custom_audio=None):
             "-shortest",
             output_file
         ]
-        subprocess.run(ffmpeg_audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            subprocess.run(ffmpeg_audio_cmd, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except subprocess.CalledProcessError as e:
+            # Don't delete temp_video here - it is the only copy of the video.
+            print(f"Error muxing audio: {e}. Restoring silent video.")
+            if not os.path.exists(output_file):
+                os.rename(temp_video, output_file)
+            raise
         print(f"Video with audio created: {output_file}")
-        
+
         if os.path.exists(temp_video):
             os.remove(temp_video)
 

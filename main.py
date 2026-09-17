@@ -192,8 +192,14 @@ def generate_video(game_dir, part_number=None):
         shutil.move(temp_video_path, output_path)
         print(f"Video saved to: {output_path}")
     else:
-        print(f"Warning: Expected video file not found at {temp_video_path}")
-    
+        # The generator can exit 0 without producing a file (e.g. the game log has
+        # no rounds because image generation failed). Fail here instead of handing
+        # a phantom path to the upload steps.
+        raise FileNotFoundError(
+            f"Video generation produced no file at {temp_video_path} "
+            f"(game dir: {game_dir}). Aborting before upload."
+        )
+
     return output_path
 
 
@@ -697,6 +703,10 @@ def upload_to_s3(video_path, part_number=None, bucket_name='ai-pictionary-videos
         print("S3 uploader not available. Skipping S3 upload.")
         return None
 
+    if not os.path.isfile(video_path):
+        print(f"❌ Local video not found: {video_path}. Not touching S3.")
+        return None
+
     try:
         # Initialize S3 client
         s3_client = boto3.client('s3')
@@ -704,14 +714,13 @@ def upload_to_s3(video_path, part_number=None, bucket_name='ai-pictionary-videos
         video_name = os.path.basename(video_path)
         s3_key = f"videos/{video_name}"
 
-        # Check if file already exists and delete it
+        # Note: an existing object is overwritten by the upload below. Never delete
+        # it first - a failed upload would then leave nothing in the bucket.
         try:
             s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-            print(f"Video {video_name} already exists in S3. Replacing...")
-            s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
-            print(f"Deleted existing video: {video_name}")
+            print(f"Video {video_name} already exists in S3. Overwriting...")
         except ClientError as e:
-            if e.response['Error']['Code'] != '404':
+            if e.response['Error']['Code'] not in ('404', 'NoSuchKey'):
                 print(f"Error checking existing file: {e}")
 
         # Upload the video (bucket policy makes it publicly accessible)
@@ -754,6 +763,10 @@ def upload_image_to_s3(image_path, part_number=None, bucket_name='ai-pictionary-
         print("S3 uploader not available. Skipping S3 upload.")
         return None
 
+    if not os.path.isfile(image_path):
+        print(f"❌ Local thumbnail not found: {image_path}. Not touching S3.")
+        return None
+
     try:
         # Initialize S3 client
         s3_client = boto3.client('s3')
@@ -761,14 +774,13 @@ def upload_image_to_s3(image_path, part_number=None, bucket_name='ai-pictionary-
         image_name = os.path.basename(image_path)
         s3_key = f"thumbnails/{image_name}"
 
-        # Check if file already exists and delete it
+        # Note: an existing object is overwritten by the upload below. Never delete
+        # it first - a failed upload would then leave nothing in the bucket.
         try:
             s3_client.head_object(Bucket=bucket_name, Key=s3_key)
-            print(f"Thumbnail {image_name} already exists in S3. Replacing...")
-            s3_client.delete_object(Bucket=bucket_name, Key=s3_key)
-            print(f"Deleted existing thumbnail: {image_name}")
+            print(f"Thumbnail {image_name} already exists in S3. Overwriting...")
         except ClientError as e:
-            if e.response['Error']['Code'] != '404':
+            if e.response['Error']['Code'] not in ('404', 'NoSuchKey'):
                 print(f"Error checking existing thumbnail: {e}")
 
         # Upload the image (bucket policy makes it publicly accessible)
