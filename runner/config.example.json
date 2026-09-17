@@ -1,0 +1,16 @@
+{
+  "host": "127.0.0.1",
+  "port": 18790,
+  "token": "REPLACE_WITH_LONG_RANDOM_STRING",
+  "ai_pictionary_dir": "C:/Users/adr23/Projects/ai_pictionary",
+  "main_py_args": [],
+  "main_py_python": "C:/Program Files/Python311/python.exe",
+  "main_py_env": {
+    "PYTHONIOENCODING": "utf-8",
+    "PYTHONUTF8": "1"
+  },
+  "host_csv_dir": "C:/Users/adr23/Projects/ai_pictionary/bulk_upload_csvs",
+  "wsl_csv_dir": "//wsl.localhost/Ubuntu-24.04/home/adr2370/openclaw/uploads",
+  "openclaw_csv_dir": "/home/node/uploads",
+  "log_dir": "C:/Users/adr23/.openclaw-runner/logs"
+}

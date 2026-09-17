@@ -19,3 +19,5 @@ dropbox_token.txt
 bulk_upload_csvs/
 github_config.json
 __pycache__/
+_rollback_quarantine_*/
+*.log
