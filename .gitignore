@@ -21,3 +21,4 @@ github_config.json
 __pycache__/
 _rollback_quarantine_*/
 *.log
+failed_games/

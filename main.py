@@ -41,6 +41,7 @@ except ImportError:
 
 
 GAMES_DIR = os.path.join(os.path.dirname(__file__), 'games')
+FAILED_GAMES_DIR = os.path.join(os.path.dirname(__file__), 'failed_games')
 VIDEO_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-python-generator.py')
 NODE_GAME_SCRIPT = os.path.join(os.path.dirname(__file__), 'pictionary-chain-local.js')
 
@@ -158,6 +159,59 @@ def find_latest_game_dir():
     latest = max(game_dirs, key=os.path.getmtime)
     print(f"Latest game directory: {latest}")
     return latest
+
+
+def list_game_dirs():
+    """Every game directory that exists right now."""
+    return {d for d in glob.glob(os.path.join(GAMES_DIR, 'pictionary_game_*')) if os.path.isdir(d)}
+
+
+def quarantine_failed_games(known_dirs, part_number):
+    """Move aside any game dir created since known_dirs was taken.
+
+    A half-finished game must not stay in games/: it would become the "latest"
+    directory and its missing last guess would break the word chain.
+    """
+    import shutil
+    moved = []
+    for d in sorted(list_game_dirs() - set(known_dirs)):
+        dest = os.path.join(FAILED_GAMES_DIR, f"part_{part_number}_{os.path.basename(d)}")
+        try:
+            os.makedirs(FAILED_GAMES_DIR, exist_ok=True)
+            shutil.move(d, dest)
+            moved.append(dest)
+        except Exception as e:
+            print(f"Warning: could not move failed game dir {d} aside: {e}")
+    return moved
+
+
+def run_game_with_retries(part_number, start_word, retries=2, retry_delay=15):
+    """Play one game and build its video, retrying the whole game on failure.
+
+    A game can die mid-round when ComfyUI or Ollama hiccups, leaving no usable
+    video. Retry that part instead of ending the entire batch. Returns
+    (game_dir, video_path); raises RuntimeError once the attempts run out.
+    """
+    attempts = retries + 1
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        known_dirs = list_game_dirs()
+        try:
+            run_js_game(start_word)
+            game_dir = find_latest_game_dir()
+            video_path = generate_video(game_dir, part_number=part_number)
+            return game_dir, video_path
+        except Exception as e:
+            last_error = e
+            print(f"⚠️ Attempt {attempt}/{attempts} for Part {part_number} failed: {e}")
+            for d in quarantine_failed_games(known_dirs, part_number):
+                print(f"   Moved failed game aside: {d}")
+            if attempt < attempts:
+                print(f"Retrying Part {part_number} in {retry_delay}s (same starting word)...")
+                time.sleep(retry_delay)
+    raise RuntimeError(
+        f"Part {part_number} failed after {attempts} attempts. Last error: {last_error}"
+    )
 
 
 def generate_video(game_dir, part_number=None):
@@ -833,6 +887,7 @@ def main():
     parser.add_argument('--start-part', type=int, default=default_start_part, help=f'Part number to start on (default: {default_start_part})')
     parser.add_argument('--wait-minutes', type=int, default=60, help='Minutes to wait between uploads and retries (default: 60)')
     parser.add_argument('--max-retries', type=int, default=50, help='Maximum number of retries for upload limit errors (default: 50)')
+    parser.add_argument('--game-retries', type=int, default=2, help='Times to replay a part whose game failed before stopping the run (default: 2)')
     parser.add_argument('--no-chain-games', action='store_true', help='Disable chaining - each game starts with a random word instead of using the last guess from the previous game')
 
     # YouTube options
@@ -921,10 +976,10 @@ def main():
             elif args.no_chain_games:
                 print("Chain mode disabled - each game starts with a random word")
             
-            run_js_game(start_word)
-            game_dir = find_latest_game_dir()
-            previous_game_dir = game_dir  # Store for next iteration
-            video_path = generate_video(game_dir, part_number=part_number)
+            game_dir, video_path = run_game_with_retries(
+                part_number, start_word, retries=args.game_retries
+            )
+            previous_game_dir = game_dir  # Store for next iteration (only on success)
             
             if args.dry_run:
                 print("[DRY RUN] Skipping all uploads.")
