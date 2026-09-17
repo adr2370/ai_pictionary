@@ -454,9 +454,22 @@ async function startComfyUI() {
       detached: false,
     });
 
-    // Suppress all ComfyUI output
-    comfyuiProcess.stdout.on("data", () => {});
-    comfyuiProcess.stderr.on("data", () => {});
+    // Mark as ours immediately so cleanup (incl. Ctrl+C) always stops this
+    // process, even if startup is interrupted before it becomes reachable.
+    comfyuiStartedByUs = true;
+
+    // Don't discard ComfyUI's output: tee it to a log file so a slow or failed
+    // startup is diagnosable instead of a silent hang.
+    const startupLogPath = path.join(COMFYUI_DIR, "comfyui_startup.log");
+    const startupLog = fs.createWriteStream(startupLogPath, { flags: "w" });
+    comfyuiProcess.stdout.on("data", (d) => startupLog.write(d));
+    comfyuiProcess.stderr.on("data", (d) => startupLog.write(d));
+
+    // Track early exit so we fail fast instead of polling a dead process.
+    let comfyExitCode = null;
+    comfyuiProcess.on("exit", (code) => {
+      comfyExitCode = code === null ? "signal" : code;
+    });
 
     comfyuiProcess.on("error", (error) => {
       console.error("Failed to start ComfyUI:", error.message);
@@ -464,13 +477,22 @@ async function startComfyUI() {
     });
 
     // Wait for ComfyUI to start up
-    console.log("Waiting for ComfyUI to start...");
+    console.log(
+      `Waiting for ComfyUI to start... (loading torch/CUDA can take a while on a cold start; see ${startupLogPath} for live progress)`,
+    );
     logToFile("Waiting for ComfyUI to start...");
 
     let attempts = 0;
-    const maxAttempts = 60; // Wait up to 60 seconds
+    const maxAttempts = 120; // Wait up to 120 seconds (cold torch/CUDA load)
 
     while (attempts < maxAttempts) {
+      // If ComfyUI died during startup, fail immediately with a pointer to why.
+      if (comfyExitCode !== null) {
+        throw new Error(
+          `ComfyUI exited during startup (code ${comfyExitCode}). See ${startupLogPath} for the error.`,
+        );
+      }
+
       try {
         const response = await axios.get(`${COMFYUI_API_URL}/system_stats`, {
           timeout: 2000,
@@ -478,18 +500,24 @@ async function startComfyUI() {
         if (response.status === 200) {
           console.log("ComfyUI server started successfully!");
           logToFile("ComfyUI server started successfully!");
-          comfyuiStartedByUs = true; // We started it
           return true;
         }
       } catch (error) {
         // Server not ready yet, continue waiting
       }
 
+      // Show a heartbeat every 10s so a working-but-slow startup isn't silent.
+      if (attempts > 0 && attempts % 10 === 0) {
+        console.log(`  ...still waiting for ComfyUI (${attempts}s elapsed)`);
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 1000));
       attempts++;
     }
 
-    throw new Error("ComfyUI failed to start within the timeout period");
+    throw new Error(
+      `ComfyUI failed to start within ${maxAttempts}s. See ${startupLogPath} for details.`,
+    );
   } catch (error) {
     console.error("Error starting ComfyUI:", error.message);
     logToFile(`Error starting ComfyUI: ${error.message}`);
@@ -813,7 +841,10 @@ async function generateImage(prompt, roundNumber) {
     // Wait for the image to be generated
     let imageFilename = null;
     let complete = false;
-    let maxTries = 60; // Wait up to 60 seconds
+    // Round 1 of each game pays a cold start: ComfyUI is relaunched per game, so
+    // this budget has to cover checkpoint + CLIP + LoRA load from disk, sampling
+    // and VAE decode. 60s was marginal and killed roughly 1 game in 20 mid-decode.
+    let maxTries = 300; // Wait up to 5 minutes
 
     while (!complete && maxTries > 0) {
       await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second
@@ -821,19 +852,23 @@ async function generateImage(prompt, roundNumber) {
       const historyResponse = await axios.get(
         `${COMFYUI_API_URL}/history/${promptId}`,
       );
-      if (
-        historyResponse.data &&
-        historyResponse.data[promptId] &&
-        historyResponse.data[promptId].outputs
-      ) {
-        for (const nodeId in historyResponse.data[promptId].outputs) {
-          const output = historyResponse.data[promptId].outputs[nodeId];
+      const entry = historyResponse.data && historyResponse.data[promptId];
+      if (entry && entry.outputs) {
+        for (const nodeId in entry.outputs) {
+          const output = entry.outputs[nodeId];
           if (output.images && output.images.length > 0) {
             imageFilename = output.images[0].filename;
             complete = true;
             break;
           }
         }
+      }
+
+      // A real node error never resolves, so fail fast instead of waiting out
+      // the full budget.
+      if (!complete && entry && entry.status && entry.status.status_str === "error") {
+        const detail = JSON.stringify(entry.status.messages || []).slice(0, 500);
+        throw new Error(`ComfyUI reported an execution error: ${detail}`);
       }
 
       maxTries--;
@@ -875,6 +910,49 @@ function encodeImage(imagePath) {
   return imageBuffer.toString("base64");
 }
 
+// POST to Ollama's /api/generate with retries on transient connection errors.
+// Ollama frequently drops the first connection ("socket hang up" / ECONNRESET)
+// while it cold-loads a vision model into VRAM, so a single attempt is fragile.
+async function ollamaGenerate(payload, maxRetries = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await axios.post(`${OLLAMA_BASE_URL}/api/generate`, payload, {
+        headers: { "Content-Type": "application/json" },
+        timeout: 120000, // 2 min: first call may cold-load the model
+      });
+    } catch (error) {
+      lastError = error;
+
+      // Only retry transient, connection-level failures. If Ollama returned an
+      // HTTP error response, the request itself was bad — retrying won't help.
+      const code = error.code || "";
+      const transient =
+        !error.response &&
+        (/socket hang up/i.test(error.message || "") ||
+          ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ECONNABORTED"].includes(
+            code,
+          ));
+
+      if (!transient || attempt === maxRetries) {
+        throw error;
+      }
+
+      const delay = 2000 * attempt; // 2s, 4s, 6s...
+      console.log(
+        `Ollama request failed (${error.message}). Retrying in ${
+          delay / 1000
+        }s... (attempt ${attempt}/${maxRetries})`,
+      );
+      logToFile(
+        `Ollama request failed (${error.message}). Retry ${attempt}/${maxRetries} after ${delay}ms.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 // Function to get a deliberately incorrect but plausible guess for the image
 async function getPlausibleWrongGuess(
   imagePath,
@@ -890,25 +968,17 @@ async function getPlausibleWrongGuess(
     // First attempt - don't tell the model the correct answer
     let prompt = `You are an AI playing Pictionary. Analyze this drawing and respond with ONLY a single word or short phrase that you think it represents. Do not include any explanations, labels, or additional text. Just the guess word/phrase.`;
 
-    const response = await axios.post(
-      `${OLLAMA_BASE_URL}/api/generate`,
-      {
-        model: MODEL_NAME,
-        prompt: prompt,
-        images: [base64Image],
-        stream: false,
-        options: {
-          temperature: 1.2,
-          top_p: 0.9,
-          max_tokens: 50,
-        },
+    const response = await ollamaGenerate({
+      model: MODEL_NAME,
+      prompt: prompt,
+      images: [base64Image],
+      stream: false,
+      options: {
+        temperature: 1.2,
+        top_p: 0.9,
+        max_tokens: 50,
       },
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    });
 
     let guess = response.data.response.trim();
     guess = guess.replace(/[.!?]+$/, ""); // Remove trailing punctuation
@@ -937,25 +1007,17 @@ async function getPlausibleWrongGuess(
         // Second attempt - now tell it the correct answer and ask for something else
         const retryPrompt = `You are an AI playing Pictionary. The actual word being drawn is: "${actualWord}". You guessed correctly, but I need you to provide a DIFFERENT guess - something that is NOT the correct answer. Analyze the drawing and respond with ONLY a single word or short phrase that is plausible but wrong. Do not include any explanations, labels, or additional text. Just the guess word/phrase.`;
 
-        const retryResponse = await axios.post(
-          `${OLLAMA_BASE_URL}/api/generate`,
-          {
-            model: MODEL_NAME,
-            prompt: retryPrompt,
-            images: [base64Image],
-            stream: false,
-            options: {
-              temperature: 1.2,
-              top_p: 0.9,
-              max_tokens: 50,
-            },
+        const retryResponse = await ollamaGenerate({
+          model: MODEL_NAME,
+          prompt: retryPrompt,
+          images: [base64Image],
+          stream: false,
+          options: {
+            temperature: 1.2,
+            top_p: 0.9,
+            max_tokens: 50,
           },
-          {
-            headers: {
-              "Content-Type": "application/json",
-            },
-          },
-        );
+        });
 
         guess = retryResponse.data.response.trim();
         guess = guess.replace(/[.!?]+$/, ""); // Remove trailing punctuation
@@ -1019,12 +1081,18 @@ function createHtmlIndex(numRounds) {
 
   // Add each round to the HTML
   for (let round = 1; round <= numRounds; round++) {
-    if (rounds[round]) {
-      const summaryPath = path.join(GAME_DIR, rounds[round].summary);
+    if (rounds[round] && rounds[round].image) {
       let actualWord = "";
       let wrongGuess = "";
 
-      if (fs.existsSync(summaryPath)) {
+      // A round may have an image but no summary if the game stopped
+      // mid-round (e.g. Ollama failed to return a guess). Skip reading the
+      // summary in that case instead of crashing on path.join(dir, undefined).
+      const summaryPath = rounds[round].summary
+        ? path.join(GAME_DIR, rounds[round].summary)
+        : null;
+
+      if (summaryPath && fs.existsSync(summaryPath)) {
         const summary = fs.readFileSync(summaryPath, "utf8");
         const actualWordMatch = summary.match(/Actual Word: (.*)/);
         const wrongGuessMatch = summary.match(/AI's Wrong Guess: (.*)/);
